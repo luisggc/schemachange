@@ -28,8 +28,9 @@ def test_deploy_continues_on_error(tmp_path: Path):
     session.get_script_metadata.return_value = ({}, {}, None)
     session.apply_change_script.side_effect = [Exception("boom"), None]
 
-    with pytest.raises(Exception):
+    with pytest.raises(Exception) as excinfo:
         deploy(config, session)
+    assert "V1__one.sql" in str(excinfo.value)
 
     assert [
         call.kwargs["script"].name

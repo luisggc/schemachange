@@ -64,4 +64,7 @@ class TestSnowflakeSession:
         ):
             session.apply_change_script(script, "select 1", False, session.logger)
         assert session.execute_snowflake_query.call_count == 2
-        assert "Failed" in session.execute_snowflake_query.call_args_list[1].args[0]
+        insert_query = session.execute_snowflake_query.call_args_list[1].args[0]
+        assert "Failed" in insert_query
+        assert "ERROR_MESSAGE" in insert_query
+        assert "boom" in insert_query

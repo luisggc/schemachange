@@ -168,6 +168,7 @@ class SnowflakeSession:
                 CHECKSUM VARCHAR,
                 EXECUTION_TIME NUMBER,
                 STATUS VARCHAR,
+                ERROR_MESSAGE VARCHAR,
                 INSTALLED_BY VARCHAR,
                 INSTALLED_ON TIMESTAMP_LTZ
             )
@@ -316,6 +317,7 @@ class SnowflakeSession:
         checksum = hashlib.sha224(script_content.encode("utf-8")).hexdigest()
         execution_time = 0
         status = "Success"
+        error_message = ""
         error: Exception | None = None
         start = time.time()
         if len(script_content) > 0:
@@ -326,6 +328,7 @@ class SnowflakeSession:
             except Exception as e:
                 status = "Failed"
                 error = e
+                error_message = str(e).replace("'", "''")
             finally:
                 self.reset_query_tag(logger=logger)
                 self.reset_session(logger=logger)
@@ -333,6 +336,7 @@ class SnowflakeSession:
                 execution_time = round(end - start)
 
         # Compose and execute the insert statement to the log file
+        script_version = getattr(script, "version", "")
         query = f"""\
             INSERT INTO {self.change_history_table.fully_qualified} (
                 VERSION,
@@ -342,20 +346,24 @@ class SnowflakeSession:
                 CHECKSUM,
                 EXECUTION_TIME,
                 STATUS,
+                ERROR_MESSAGE,
                 INSTALLED_BY,
                 INSTALLED_ON
             ) VALUES (
-                '{getattr(script, "version", "")}',
+                '{script_version}',
                 '{script.description}',
                 '{script.name}',
                 '{script.type}',
                 '{checksum}',
                 {execution_time},
                 '{status}',
+                '{error_message}',
                 '{self.user}',
                 CURRENT_TIMESTAMP
             );
         """
         self.execute_snowflake_query(dedent(query), logger=logger)
         if status != "Success":
-            raise Exception(f"Failed to execute {script.name}") from error
+            raise Exception(
+                f"Failed to execute {script.name}: {error_message}"
+            ) from error

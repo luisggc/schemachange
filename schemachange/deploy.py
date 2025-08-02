@@ -76,6 +76,7 @@ def deploy(config: DeployConfig, session: SnowflakeSession):
     scripts_skipped = 0
     scripts_applied = 0
     scripts_failed = 0
+    failed_scripts: list[str] = []
 
     # Loop through each script in order and apply any required changes
     for script_name in all_script_names_sorted:
@@ -155,6 +156,7 @@ def deploy(config: DeployConfig, session: SnowflakeSession):
             scripts_applied += 1
         except Exception as e:
             scripts_failed += 1
+            failed_scripts.append(script.name)
             script_log.error("Failed to apply change script", error=str(e))
             if not should_continue:
                 raise
@@ -165,8 +167,11 @@ def deploy(config: DeployConfig, session: SnowflakeSession):
             scripts_applied=scripts_applied,
             scripts_skipped=scripts_skipped,
             scripts_failed=scripts_failed,
+            failed_scripts=failed_scripts,
         )
-        raise Exception(f"{scripts_failed} change script(s) failed")
+        raise Exception(
+            f"{scripts_failed} change script(s) failed: {', '.join(failed_scripts)}"
+        )
     else:
         logger.info(
             "Completed successfully",

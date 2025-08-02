@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 
 ## [4.1.0] - 2025-03-18
 ### Added
-- Optional flags to continue deploying remaining scripts after an error and record failed scripts in the change history table.
+- Optional flags to continue deploying remaining scripts after an error, recording full error messages in the change history table and listing failed scripts at completion.
 
 ## [4.0.1] - 2025-02-17
 ### Changed

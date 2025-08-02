@@ -482,6 +482,8 @@ usage: schemachange deploy [-h] [--config-folder CONFIG_FOLDER] [--config-file-n
 | --continue-always-on-error                                           | Continue executing remaining always scripts after an error. The default is 'False'.                                                         |
 | --query-tag                                                          | A string to include in the QUERY_TAG that is attached to every SQL statement executed.                                                                                                                                                                              |
 
+When any continue-on-error flag is used, schemachange records full error messages for failed scripts in the change history table and reports the list of failed scripts before exiting.
+
 ### render
 
 This subcommand is used to render a single script to the console. It is intended to support the development and
