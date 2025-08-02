@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 import structlog
+from snowflake.connector.errors import ProgrammingError
 
 from schemachange.config.ChangeHistoryTable import ChangeHistoryTable
 from schemachange.session.SnowflakeSession import SnowflakeSession
@@ -68,3 +69,26 @@ class TestSnowflakeSession:
         assert "Failed" in insert_query
         assert "ERROR_MESSAGE" in insert_query
         assert "boom" in insert_query
+
+    def test_apply_change_script_missing_error_message_column(
+        self, session: SnowflakeSession
+    ):
+        script = VersionedScript.from_path(Path("V1__test.sql"))
+        session.execute_snowflake_query = mock.Mock(
+            side_effect=[
+                Exception("boom"),
+                ProgrammingError("invalid identifier 'ERROR_MESSAGE'", 0, 0),
+                None,
+            ]
+        )
+        with (
+            mock.patch.object(session, "reset_session"),
+            mock.patch.object(session, "reset_query_tag"),
+            pytest.raises(Exception),
+        ):
+            session.apply_change_script(script, "select 1", False, session.logger)
+        assert session.execute_snowflake_query.call_count == 3
+        first_insert = session.execute_snowflake_query.call_args_list[1].args[0]
+        fallback_insert = session.execute_snowflake_query.call_args_list[2].args[0]
+        assert "ERROR_MESSAGE" in first_insert
+        assert "ERROR_MESSAGE" not in fallback_insert
