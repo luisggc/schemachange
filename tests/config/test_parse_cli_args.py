@@ -65,6 +65,10 @@ def test_parse_args_deploy_names():
         ("--create-change-history-table", True),
         ("--autocommit", True),
         ("--dry-run", True),
+        ("--continue-all-on-error", True),
+        ("--continue-versioned-on-error", True),
+        ("--continue-repeatable-on-error", True),
+        ("--continue-always-on-error", True),
     ]
 
     for arg, expected_value in valueless_test_args:

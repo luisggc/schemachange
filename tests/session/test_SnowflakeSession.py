@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from unittest import mock
+from pathlib import Path
 
 import pytest
 import structlog
 
 from schemachange.config.ChangeHistoryTable import ChangeHistoryTable
 from schemachange.session.SnowflakeSession import SnowflakeSession
+from schemachange.session.Script import VersionedScript
 
 
 @pytest.fixture
@@ -47,3 +49,19 @@ class TestSnowflakeSession:
         assert result == {}
         assert session.con.execute_string.call_count == 1
         assert session.logger.calls[1][1][0] == "Executing query"
+
+    def test_apply_change_script_failure_records_history(
+        self, session: SnowflakeSession
+    ):
+        script = VersionedScript.from_path(Path("V1__test.sql"))
+        session.execute_snowflake_query = mock.Mock(
+            side_effect=[Exception("boom"), None]
+        )
+        with (
+            mock.patch.object(session, "reset_session"),
+            mock.patch.object(session, "reset_query_tag"),
+            pytest.raises(Exception),
+        ):
+            session.apply_change_script(script, "select 1", False, session.logger)
+        assert session.execute_snowflake_query.call_count == 2
+        assert "Failed" in session.execute_snowflake_query.call_args_list[1].args[0]

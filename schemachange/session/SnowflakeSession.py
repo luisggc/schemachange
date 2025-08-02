@@ -316,20 +316,21 @@ class SnowflakeSession:
         checksum = hashlib.sha224(script_content.encode("utf-8")).hexdigest()
         execution_time = 0
         status = "Success"
-
-        # Execute the contents of the script
+        error: Exception | None = None
+        start = time.time()
         if len(script_content) > 0:
-            start = time.time()
             self.reset_session(logger=logger)
             self.reset_query_tag(extra_tag=script.name, logger=logger)
             try:
                 self.execute_snowflake_query(query=script_content, logger=logger)
             except Exception as e:
-                raise Exception(f"Failed to execute {script.name}") from e
-            self.reset_query_tag(logger=logger)
-            self.reset_session(logger=logger)
-            end = time.time()
-            execution_time = round(end - start)
+                status = "Failed"
+                error = e
+            finally:
+                self.reset_query_tag(logger=logger)
+                self.reset_session(logger=logger)
+                end = time.time()
+                execution_time = round(end - start)
 
         # Compose and execute the insert statement to the log file
         query = f"""\
@@ -356,3 +357,5 @@ class SnowflakeSession:
             );
         """
         self.execute_snowflake_query(dedent(query), logger=logger)
+        if status != "Success":
+            raise Exception(f"Failed to execute {script.name}") from error
