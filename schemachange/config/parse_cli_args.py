@@ -221,6 +221,38 @@ def parse_cli_args(args) -> dict:
         help="The string to add to the Snowflake QUERY_TAG session value for each query executed",
         required=False,
     )
+    parser_deploy.add_argument(
+        "--continue-versioned-on-error",
+        action="store_const",
+        const=True,
+        default=None,
+        help="Continue running remaining versioned scripts after an error (the default is False)",
+        required=False,
+    )
+    parser_deploy.add_argument(
+        "--continue-repeatable-on-error",
+        action="store_const",
+        const=True,
+        default=None,
+        help="Continue running remaining repeatable scripts after an error (the default is False)",
+        required=False,
+    )
+    parser_deploy.add_argument(
+        "--continue-always-on-error",
+        action="store_const",
+        const=True,
+        default=None,
+        help="Continue running remaining always scripts after an error (the default is False)",
+        required=False,
+    )
+    parser_deploy.add_argument(
+        "--continue-all-on-error",
+        action="store_const",
+        const=True,
+        default=None,
+        help="Continue running remaining scripts after an error (the default is False)",
+        required=False,
+    )
     parser_render = subcommands.add_parser(
         "render",
         description="Renders a script to the console, used to check and verify jinja output from scripts.",

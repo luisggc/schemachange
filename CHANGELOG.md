@@ -3,6 +3,12 @@ All notable changes to this project will be documented in this file.
 
 *The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).*
 
+## [4.1.0] - 2025-08-02
+### Added
+- Optional flags to continue deploying remaining scripts after an error, recording full error messages in the change history table and listing failed scripts at completion.
+### Fixed
+- Automatically add missing `ERROR_MESSAGE` column to the change history table to capture full script errors
+
 ## [4.0.1] - 2025-02-17
 ### Changed
 - Added back the ability to pass the Snowflake password in the `SNOWFLAKE_PASSWORD` environment variable.
