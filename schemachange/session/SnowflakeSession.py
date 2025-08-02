@@ -362,38 +362,21 @@ class SnowflakeSession:
                 CURRENT_TIMESTAMP
             );
         """
+        dedent_query = dedent(query)
         try:
-            self.execute_snowflake_query(dedent(query), logger=logger)
+            self.execute_snowflake_query(dedent_query, logger=logger)
         except snowflake.connector.errors.ProgrammingError as e:
             if "ERROR_MESSAGE" in str(e):
                 logger.warning(
-                    "Change history table missing ERROR_MESSAGE column, inserting without",
+                    "Change history table missing ERROR_MESSAGE column, adding column",
                     error=str(e),
                 )
-                fallback = f"""\
-                    INSERT INTO {self.change_history_table.fully_qualified} (
-                        VERSION,
-                        DESCRIPTION,
-                        SCRIPT,
-                        SCRIPT_TYPE,
-                        CHECKSUM,
-                        EXECUTION_TIME,
-                        STATUS,
-                        INSTALLED_BY,
-                        INSTALLED_ON
-                    ) VALUES (
-                        '{script_version}',
-                        '{script.description}',
-                        '{script.name}',
-                        '{script.type}',
-                        '{checksum}',
-                        {execution_time},
-                        '{status}',
-                        '{self.user}',
-                        CURRENT_TIMESTAMP
-                    );
-                """
-                self.execute_snowflake_query(dedent(fallback), logger=logger)
+                alter_query = (
+                    f"ALTER TABLE {self.change_history_table.fully_qualified} "
+                    "ADD COLUMN IF NOT EXISTS ERROR_MESSAGE VARCHAR"
+                )
+                self.execute_snowflake_query(alter_query, logger=logger)
+                self.execute_snowflake_query(dedent_query, logger=logger)
             else:
                 raise
         if status != "Success":

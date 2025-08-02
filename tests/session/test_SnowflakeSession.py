@@ -79,6 +79,7 @@ class TestSnowflakeSession:
                 Exception("boom"),
                 ProgrammingError("invalid identifier 'ERROR_MESSAGE'", 0, 0),
                 None,
+                None,
             ]
         )
         with (
@@ -87,8 +88,12 @@ class TestSnowflakeSession:
             pytest.raises(Exception),
         ):
             session.apply_change_script(script, "select 1", False, session.logger)
-        assert session.execute_snowflake_query.call_count == 3
+        assert session.execute_snowflake_query.call_count == 4
         first_insert = session.execute_snowflake_query.call_args_list[1].args[0]
-        fallback_insert = session.execute_snowflake_query.call_args_list[2].args[0]
+        alter_stmt = session.execute_snowflake_query.call_args_list[2].args[0]
+        retry_insert = session.execute_snowflake_query.call_args_list[3].args[0]
         assert "ERROR_MESSAGE" in first_insert
-        assert "ERROR_MESSAGE" not in fallback_insert
+        assert "ALTER TABLE" in alter_stmt
+        assert "ADD COLUMN" in alter_stmt
+        assert "ERROR_MESSAGE" in alter_stmt
+        assert "ERROR_MESSAGE" in retry_insert
