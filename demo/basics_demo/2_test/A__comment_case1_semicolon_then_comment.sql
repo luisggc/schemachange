@@ -7,4 +7,3 @@ use schema {{ schema_name }};
 
 select 1;
 --comment
-

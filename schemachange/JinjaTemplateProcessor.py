@@ -131,10 +131,7 @@ class JinjaTemplateProcessor:
                 continue
 
             # Check if this is a comment-only line
-            is_comment_only = (
-                stripped.startswith("--")
-                or (stripped.startswith("/*") and stripped.endswith("*/"))
-            )
+            is_comment_only = stripped.startswith("--") or (stripped.startswith("/*") and stripped.endswith("*/"))
 
             if is_comment_only:
                 # If we've already found a terminator, comments before it are fine
@@ -160,8 +157,7 @@ class JinjaTemplateProcessor:
         # If there's no terminator, Snowflake executes the whole thing as one statement
         if needs_trailing_noop and found_statement_terminator:
             content = (
-                content.rstrip()
-                + "\nSELECT 1; -- schemachange: ensures trailing comments don't cause empty SQL error"
+                content.rstrip() + "\nSELECT 1; -- schemachange: ensures trailing comments don't cause empty SQL error"
             )
             logger.debug(
                 "Script has trailing comments after semicolon - appending no-op statement",
