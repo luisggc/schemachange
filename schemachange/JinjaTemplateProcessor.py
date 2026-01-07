@@ -58,17 +58,22 @@ class JinjaTemplateProcessor:
             raw_content = raw_content[1:]
 
         content = raw_content.strip()
-        content = content[:-1] if content.endswith(";") else content
+        # Note: We intentionally do NOT strip trailing semicolons here.
+        # Stripping them caused regression #406/#258 where scripts like:
+        #   SELECT 1\n-- comment\n;
+        # Lost their terminating semicolon and broke.
 
         # Validate content is not empty after processing
-        if not content or content.isspace():
+        # Also catch files that contain only semicolons (meaningless SQL)
+        content_without_semicolons = content.replace(";", "").strip()
+        if not content or content.isspace() or not content_without_semicolons:
             error_msg = (
                 f"Script '{script}' rendered to empty SQL content after Jinja processing.\n"
                 f"This can happen when:\n"
                 f"  1. The file contains only whitespace\n"
                 f"  2. All Jinja conditional blocks evaluate to false\n"
                 f"  3. Template variables are missing or incorrect\n"
-                f"  4. The file contains only a semicolon after rendering\n"
+                f"  4. The file contains only semicolons after rendering\n"
                 f"\nRaw content preview (first 500 chars):\n{raw_content[:500]}\n"
                 f"\nProvided variables: {list(variables.keys()) if variables else 'None'}"
             )
@@ -104,23 +109,63 @@ class JinjaTemplateProcessor:
             logger.error("SQL content contains only comments", script=script, original_length=len(content))
             raise ValueError(error_msg)
 
-        # Case 2: Script has valid SQL but ends with comment lines
-        # Snowflake connector may strip trailing comments leaving the last statement empty
-        # Check if the last non-empty line is a comment
+        # Check if script ends with trailing comments AFTER a semicolon-terminated statement
+        # This causes "Empty SQL Statement" error because Snowflake:
+        # 1. Executes the statement before the ;
+        # 2. Looks for next statement after the ;
+        # 3. Finds only comments, strips them, gets empty string → ERROR
+        #
+        # Cases:
+        # - "SELECT 1;\n-- comment" → NEEDS SELECT 1 (trailing comments after ;)
+        # - "SELECT 1\n-- comment\n;" → OK (; is last, terminates the SELECT)
+        # - "SELECT 1; -- inline" → OK (inline comment on same line as ;)
+        # - "SELECT 1\n-- comment" → OK (no ; so whole thing is one statement)
+        
         lines = content.rstrip().split("\n")
-        last_line = lines[-1].strip() if lines else ""
-
-        if last_line.startswith("--") or (last_line.startswith("/*") and last_line.endswith("*/")):
-            # Append a no-op statement to ensure Snowflake has something to execute after stripping comments
-            # This preserves metadata comments while preventing "Empty SQL Statement" errors
+        needs_trailing_noop = False
+        found_statement_terminator = False
+        
+        for line in reversed(lines):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            
+            # Check if this is a comment-only line
+            is_comment_only = (
+                stripped.startswith("--") or 
+                (stripped.startswith("/*") and stripped.endswith("*/"))
+            )
+            
+            if is_comment_only:
+                # If we've already found a terminator, comments before it are fine
+                if found_statement_terminator:
+                    break
+                # Found trailing comment before finding terminator
+                needs_trailing_noop = True
+                continue
+            
+            # Non-comment line - check for statement terminator
+            # Handle inline comments: "SELECT 1; -- comment" should count as terminated
+            sql_part = stripped
+            if "--" in stripped:
+                sql_part = stripped.split("--")[0].strip()
+            
+            if sql_part.endswith(";") or sql_part == ";":
+                found_statement_terminator = True
+            
+            # Found SQL content - stop looking
+            break
+        
+        # Only append if we found trailing comments AFTER a statement terminator
+        # If there's no terminator, Snowflake executes the whole thing as one statement
+        if needs_trailing_noop and found_statement_terminator:
             content = (
-                content.rstrip()
-                + "\nSELECT 1; -- schemachange: no-op statement to prevent empty SQL after comment stripping"
+                content.rstrip() 
+                + "\nSELECT 1; -- schemachange: ensures trailing comments don't cause empty SQL error"
             )
             logger.debug(
-                "Script ends with comment - appending no-op statement",
+                "Script has trailing comments after semicolon - appending no-op statement",
                 script=script,
-                last_line_preview=last_line[:100],
             )
 
         return content

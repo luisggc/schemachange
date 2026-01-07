@@ -366,10 +366,11 @@ export SNOWFLAKE_PASSWORD="my_password"
 
 ### Error: `Script rendered to empty SQL content` or `Script contains only SQL comments` (Issue #258)
 
-**Root Cause:** After Jinja template processing, the script contains only whitespace or comments that Snowflake's connector strips before execution.
+**Root Cause:** After Jinja template processing, the script contains only whitespace or comments.
 
-**How Schemachange Fixes This:**
-- ✅ **Valid SQL + trailing comments**: Auto-appends `SELECT 1;` no-op statement (metadata preserved, debug log message shown)
+**How Schemachange Handles This:**
+- ✅ **SQL + comments before `;`**: Passes through unchanged (e.g., `SELECT 1\n-- comment\n;`)
+- ✅ **SQL with trailing comments after `;`**: Auto-appends `SELECT 1;` to prevent empty statement error
 - ❌ **Comment-only or empty scripts**: Raises clear error with debugging info
 
 **Common Scenarios:**

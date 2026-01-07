@@ -1,3 +1,6 @@
+-- Test: File ending with comment (original issue #258)
+-- schemachange should automatically handle this by appending SELECT 1
+
 use database {{ database_name }};
 use schema {{ schema_name }};
 
@@ -6,5 +9,3 @@ create transient table FORGETMEPLEASE (
 );
 
 -- comment in the last line
--- Adding query to avoid last comment line.
-SELECT 1;
