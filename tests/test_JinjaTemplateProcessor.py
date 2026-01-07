@@ -346,7 +346,7 @@ class TestJinjaTemplateProcessor:
 
     def test_case1_semicolon_then_comment_on_new_line(self, processor: JinjaTemplateProcessor):
         """Case 1: select 1;\\n--comment
-        
+
         After the semicolon, Snowflake sees the comment, strips it, and would get
         an empty statement error. We append SELECT 1 to prevent this.
         """
@@ -362,7 +362,7 @@ class TestJinjaTemplateProcessor:
 
     def test_case2_semicolon_comment_semicolon(self, processor: JinjaTemplateProcessor):
         """Case 2: select 1;\\n--comment\\n;
-        
+
         The trailing semicolon creates an empty statement which Snowflake accepts.
         No SELECT 1 needed because the final ; handles it.
         """
@@ -379,7 +379,7 @@ class TestJinjaTemplateProcessor:
 
     def test_case3_sql_comment_semicolon(self, processor: JinjaTemplateProcessor):
         """Case 3: select 1\\n--comment\\n;
-        
+
         This is one statement with a comment in the middle, terminated by ;
         No modification needed.
         """
@@ -396,7 +396,7 @@ class TestJinjaTemplateProcessor:
 
     def test_case4_sql_comment_semicolon_inline_comment(self, processor: JinjaTemplateProcessor):
         """Case 4: select 1\\n--comment\\n;--comment
-        
+
         One statement terminated by ;, with inline comment on same line as ;
         The trailing --comment on the ; line is fine.
         """

@@ -120,22 +120,22 @@ class JinjaTemplateProcessor:
         # - "SELECT 1\n-- comment\n;" → OK (; is last, terminates the SELECT)
         # - "SELECT 1; -- inline" → OK (inline comment on same line as ;)
         # - "SELECT 1\n-- comment" → OK (no ; so whole thing is one statement)
-        
+
         lines = content.rstrip().split("\n")
         needs_trailing_noop = False
         found_statement_terminator = False
-        
+
         for line in reversed(lines):
             stripped = line.strip()
             if not stripped:
                 continue
-            
+
             # Check if this is a comment-only line
             is_comment_only = (
-                stripped.startswith("--") or 
-                (stripped.startswith("/*") and stripped.endswith("*/"))
+                stripped.startswith("--")
+                or (stripped.startswith("/*") and stripped.endswith("*/"))
             )
-            
+
             if is_comment_only:
                 # If we've already found a terminator, comments before it are fine
                 if found_statement_terminator:
@@ -143,24 +143,24 @@ class JinjaTemplateProcessor:
                 # Found trailing comment before finding terminator
                 needs_trailing_noop = True
                 continue
-            
+
             # Non-comment line - check for statement terminator
             # Handle inline comments: "SELECT 1; -- comment" should count as terminated
             sql_part = stripped
             if "--" in stripped:
                 sql_part = stripped.split("--")[0].strip()
-            
+
             if sql_part.endswith(";") or sql_part == ";":
                 found_statement_terminator = True
-            
+
             # Found SQL content - stop looking
             break
-        
+
         # Only append if we found trailing comments AFTER a statement terminator
         # If there's no terminator, Snowflake executes the whole thing as one statement
         if needs_trailing_noop and found_statement_terminator:
             content = (
-                content.rstrip() 
+                content.rstrip()
                 + "\nSELECT 1; -- schemachange: ensures trailing comments don't cause empty SQL error"
             )
             logger.debug(
