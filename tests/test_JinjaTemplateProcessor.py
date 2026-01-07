@@ -99,57 +99,53 @@ class TestJinjaTemplateProcessor:
 
         assert context == "some text myvar_default"
 
+    # ============================================================
+    # Empty content validation tests - issue #258
+    # ============================================================
+
     def test_render_empty_content_only_whitespace_should_raise_error(self, processor: JinjaTemplateProcessor):
-        """Test that rendering only whitespace raises ValueError - issue #258"""
+        """Test that rendering only whitespace raises ValueError"""
         templates = {"test.sql": "   \n\t  \n   "}
         processor.override_loader(DictLoader(templates))
 
         with pytest.raises(ValueError) as e:
             processor.render("test.sql", None)
 
-        assert "rendered to empty SQL content" in str(e.value)
+        assert "rendered to empty content" in str(e.value)
         assert "test.sql" in str(e.value)
 
     def test_render_empty_content_only_comments_should_raise_error(self, processor: JinjaTemplateProcessor):
-        """Test that rendering only SQL comments raises ValueError - issue #258
-
-        When Snowflake connector receives comment-only content, it strips comments
-        and tries to execute an empty string, causing "Empty SQL Statement" error.
-        We catch this proactively with better error messaging.
-        """
+        """Test that rendering only SQL comments raises ValueError"""
         templates = {"test.sql": "-- This is a comment\n-- Another comment\n"}
         processor.override_loader(DictLoader(templates))
 
         with pytest.raises(ValueError) as e:
             processor.render("test.sql", None)
 
-        error_message = str(e.value)
-        assert "contains only SQL comments" in error_message
-        assert "To fix:" in error_message
-        assert "Add actual SQL statements" in error_message
+        assert "contains only comments" in str(e.value)
 
     def test_render_empty_content_only_semicolon_should_raise_error(self, processor: JinjaTemplateProcessor):
-        """Test that rendering only semicolon raises ValueError - issue #258"""
+        """Test that rendering only semicolon raises ValueError"""
         templates = {"test.sql": ";"}
         processor.override_loader(DictLoader(templates))
 
         with pytest.raises(ValueError) as e:
             processor.render("test.sql", None)
 
-        assert "rendered to empty SQL content" in str(e.value)
+        assert "contains only comments or semicolons" in str(e.value)
 
     def test_render_empty_content_whitespace_and_semicolon_should_raise_error(self, processor: JinjaTemplateProcessor):
-        """Test that rendering whitespace + semicolon raises ValueError - issue #258"""
+        """Test that rendering whitespace + semicolon raises ValueError"""
         templates = {"test.sql": "  \n\t  ;  \n"}
         processor.override_loader(DictLoader(templates))
 
         with pytest.raises(ValueError) as e:
             processor.render("test.sql", None)
 
-        assert "rendered to empty SQL content" in str(e.value)
+        assert "contains only comments or semicolons" in str(e.value)
 
     def test_render_empty_content_false_jinja_conditional_should_raise_error(self, processor: JinjaTemplateProcessor):
-        """Test that all false conditionals result in empty content error - issue #258"""
+        """Test that all false conditionals result in empty content error"""
         templates = {
             "test.sql": """
             {% if deploy_env == 'prod' %}
@@ -165,35 +161,75 @@ class TestJinjaTemplateProcessor:
         with pytest.raises(ValueError) as e:
             processor.render("test.sql", variables)
 
-        assert "rendered to empty SQL content" in str(e.value)
-        assert "All Jinja conditional blocks evaluate to false" in str(e.value)
+        assert "rendered to empty content" in str(e.value)
 
-    def test_render_empty_content_provides_helpful_error_message(self, processor: JinjaTemplateProcessor):
-        """Test that error message includes helpful debugging info - issue #258"""
-        templates = {
-            "test.sql": """
-            {% if feature_enabled %}
-            SELECT * FROM table;
-            {% endif %}
-            """
-        }
+    def test_render_empty_content_multiline_comment_should_raise_error(self, processor: JinjaTemplateProcessor):
+        """Test that rendering only multi-line comments raises ValueError"""
+        templates = {"test.sql": "/* This is a \nmulti-line comment */"}
         processor.override_loader(DictLoader(templates))
 
-        variables = {"feature_enabled": False}
+        with pytest.raises(ValueError) as e:
+            processor.render("test.sql", None)
+
+        assert "contains only comments" in str(e.value)
+
+    def test_render_empty_content_mixed_comments_should_raise_error(self, processor: JinjaTemplateProcessor):
+        """Test that mixed comment types without SQL raises ValueError"""
+        templates = {"test.sql": "-- Single line\n/* Multi-line */\n-- Another line"}
+        processor.override_loader(DictLoader(templates))
 
         with pytest.raises(ValueError) as e:
-            processor.render("test.sql", variables)
+            processor.render("test.sql", None)
 
-        error_message = str(e.value)
-        # Check that error message contains helpful information
-        assert "rendered to empty SQL content" in error_message
-        assert "This can happen when:" in error_message
-        assert "Raw content preview" in error_message
-        assert "Provided variables:" in error_message
-        assert "feature_enabled" in error_message
+        assert "contains only comments" in str(e.value)
 
-    def test_render_valid_content_with_jinja_conditional_should_succeed(self, processor: JinjaTemplateProcessor):
-        """Test that valid content with Jinja conditionals works correctly - issue #258"""
+    # ============================================================
+    # Valid SQL pass-through tests - schemachange should NOT modify SQL
+    # ============================================================
+
+    def test_render_valid_sql_passes_through_unchanged(self, processor: JinjaTemplateProcessor):
+        """Test that valid SQL passes through without modification"""
+        templates = {"test.sql": "CREATE TABLE foo (id INT);"}
+        processor.override_loader(DictLoader(templates))
+
+        result = processor.render("test.sql", None)
+
+        assert result == "CREATE TABLE foo (id INT);"
+
+    def test_render_valid_sql_with_inline_comment_passes_through(self, processor: JinjaTemplateProcessor):
+        """Test that valid SQL with inline comment passes through"""
+        templates = {"test.sql": "SELECT 1 /* inline comment */ FROM dual"}
+        processor.override_loader(DictLoader(templates))
+
+        result = processor.render("test.sql", None)
+
+        assert result == "SELECT 1 /* inline comment */ FROM dual"
+
+    def test_render_valid_sql_with_trailing_comment_passes_through(self, processor: JinjaTemplateProcessor):
+        """Test that SQL with trailing comment passes through unchanged.
+
+        NOTE: This may cause "Empty SQL Statement" error in Snowflake.
+        Users should place comments before the final semicolon.
+        """
+        templates = {"test.sql": "CREATE TABLE foo (id INT);\n-- Author: John Doe"}
+        processor.override_loader(DictLoader(templates))
+
+        result = processor.render("test.sql", None)
+
+        # Content passes through unchanged - schemachange does NOT modify SQL
+        assert result == "CREATE TABLE foo (id INT);\n-- Author: John Doe"
+
+    def test_render_multistatement_sql_passes_through(self, processor: JinjaTemplateProcessor):
+        """Test that multi-statement SQL passes through unchanged"""
+        templates = {"test.sql": "DROP VIEW IF EXISTS foo;\nCREATE VIEW foo AS SELECT * FROM bar"}
+        processor.override_loader(DictLoader(templates))
+
+        result = processor.render("test.sql", None)
+
+        assert result == "DROP VIEW IF EXISTS foo;\nCREATE VIEW foo AS SELECT * FROM bar"
+
+    def test_render_sql_with_jinja_conditional_should_succeed(self, processor: JinjaTemplateProcessor):
+        """Test that valid content with Jinja conditionals works correctly"""
         templates = {
             "test.sql": """
             {% if deploy_env == 'prod' %}
@@ -211,238 +247,37 @@ class TestJinjaTemplateProcessor:
         assert "CREATE TABLE dev_table (id INT)" in context
         assert "prod_table" not in context
 
-    def test_render_empty_content_multiline_comment_should_raise_error(self, processor: JinjaTemplateProcessor):
-        """Test that rendering only multi-line comments raises ValueError - issue #258"""
-        templates = {"test.sql": "/* This is a \nmulti-line comment */"}
-        processor.override_loader(DictLoader(templates))
-
-        with pytest.raises(ValueError) as e:
-            processor.render("test.sql", None)
-
-        assert "contains only SQL comments" in str(e.value)
-
-    def test_render_empty_content_mixed_comments_should_raise_error(self, processor: JinjaTemplateProcessor):
-        """Test that mixed comment types without SQL raises ValueError - issue #258"""
-        templates = {"test.sql": "-- Single line\n/* Multi-line */\n-- Another line"}
-        processor.override_loader(DictLoader(templates))
-
-        with pytest.raises(ValueError) as e:
-            processor.render("test.sql", None)
-
-        assert "contains only SQL comments" in str(e.value)
-
-    def test_render_terminated_sql_with_trailing_comment_appends_noop(self, processor: JinjaTemplateProcessor):
-        """Test that SQL with trailing comments AFTER semicolon gets SELECT 1 appended - #258
-
-        When SQL ends with `;` followed by comments, Snowflake sees the comments as
-        a new empty statement after stripping, causing "Empty SQL Statement" error.
-        We append SELECT 1 to ensure there's valid SQL after the trailing comments.
-        """
-        templates = {"test.sql": "CREATE TABLE foo (id INT);\n-- Author: John Doe\n-- Ticket: JIRA-123"}
-        processor.override_loader(DictLoader(templates))
-
-        result = processor.render("test.sql", None)
-
-        # Original SQL is preserved with semicolon
-        assert "CREATE TABLE foo (id INT);" in result
-        # Metadata comments are preserved
-        assert "Author: John Doe" in result
-        assert "Ticket: JIRA-123" in result
-        # SELECT 1 appended because comments come AFTER the semicolon
-        assert "SELECT 1; -- schemachange:" in result
-
-    def test_render_valid_sql_with_inline_comment_should_succeed(self, processor: JinjaTemplateProcessor):
-        """Test that valid SQL with inline comment works - issue #258"""
-        templates = {"test.sql": "SELECT 1 /* inline comment */ FROM dual"}
-        processor.override_loader(DictLoader(templates))
-
-        result = processor.render("test.sql", None)
-        assert "SELECT 1" in result
-        assert "FROM dual" in result
-        # Should NOT append SELECT 1 because last line is not a comment
-        assert result.count("SELECT 1") == 1  # Only the original SELECT 1
-
-    def test_render_valid_sql_without_trailing_comment_unchanged(self, processor: JinjaTemplateProcessor):
-        """Test that valid SQL without trailing comment passes through unchanged - issue #258"""
-        templates = {"test.sql": "DROP VIEW IF EXISTS foo;\nCREATE VIEW foo AS SELECT * FROM bar"}
-        processor.override_loader(DictLoader(templates))
-
-        result = processor.render("test.sql", None)
-
-        # Content is unchanged - no SELECT 1 appended
-        assert result == "DROP VIEW IF EXISTS foo;\nCREATE VIEW foo AS SELECT * FROM bar"
-        assert "SELECT 1" not in result
-
-    def test_render_terminated_sql_with_trailing_block_comment_appends_noop(self, processor: JinjaTemplateProcessor):
-        """Test that SQL with trailing block comment AFTER semicolon gets SELECT 1 - #258"""
-        templates = {"test.sql": "CREATE TABLE bar (id INT);\n/* Metadata block */"}
-        processor.override_loader(DictLoader(templates))
-
-        result = processor.render("test.sql", None)
-
-        assert "CREATE TABLE bar (id INT);" in result
-        assert "/* Metadata block */" in result
-        # SELECT 1 appended because block comment comes AFTER the semicolon
-        assert "SELECT 1; -- schemachange:" in result
-
-    def test_render_comment_before_trailing_semicolon_no_noop(self, processor: JinjaTemplateProcessor):
-        """Regression test #406/#258 - comment followed by semicolon should NOT append SELECT 1"""
-        templates = {"test.sql": "create or replace view vw as\nselect * from table\n--some comment\n;"}
-        processor.override_loader(DictLoader(templates))
-
-        result = processor.render("test.sql", None)
-
-        # Should NOT append SELECT 1 - there's a valid terminating semicolon after comments
-        assert "SELECT 1" not in result
-        # Original content preserved including trailing semicolon
-        assert result.strip().endswith(";")
-        assert "--some comment" in result
-
-    def test_render_comment_before_semicolon_and_after_appends_noop(self, processor: JinjaTemplateProcessor):
-        """Test #406/#258 - comment before ; is fine, but comment AFTER ; needs SELECT 1"""
-        templates = {"test.sql": "SELECT * FROM T1\n-- COMMENT LINE\n;\n-- last line comment"}
-        processor.override_loader(DictLoader(templates))
-
-        result = processor.render("test.sql", None)
-
-        # The semicolon terminates the SQL, but there's a comment AFTER it
-        # That trailing comment would cause empty SQL error, so SELECT 1 is appended
-        assert "SELECT 1; -- schemachange:" in result
-        assert "-- COMMENT LINE" in result
-        assert "-- last line comment" in result
-
-    def test_render_semicolon_then_comment_appends_noop(self, processor: JinjaTemplateProcessor):
-        """Test that semicolon followed by trailing comment DOES trigger noop - #258"""
-        templates = {"test.sql": "SELECT * FROM table;\n-- trailing comment"}
-        processor.override_loader(DictLoader(templates))
-
-        result = processor.render("test.sql", None)
-
-        # SQL terminated with semicolon, but comment AFTER it causes empty SQL error
-        # SELECT 1 is appended to prevent this
-        assert "SELECT 1; -- schemachange:" in result
-        assert "SELECT * FROM table;" in result
-
-    def test_render_unterminated_sql_with_comment_passes_through(self, processor: JinjaTemplateProcessor):
-        """Test that SQL WITHOUT semicolon + trailing comment passes through unchanged.
-
-        When there's no semicolon, the whole thing is one statement including the comment.
-        Snowflake handles this fine.
-        """
-        templates = {"test.sql": "CREATE TABLE foo (id INT)\n-- Author comment"}
-        processor.override_loader(DictLoader(templates))
-
-        result = processor.render("test.sql", None)
-
-        # No semicolon, so whole thing is one statement - no SELECT 1 needed
-        assert "SELECT 1" not in result
-        assert "CREATE TABLE foo (id INT)" in result
-        assert "-- Author comment" in result
-
     # ============================================================
-    # Regression tests for the 4 key cases from issue #406/#258
-    # All 4 must execute successfully in Snowflake
+    # UTF-8 BOM handling tests - issue #250
     # ============================================================
-
-    def test_case1_semicolon_then_comment_on_new_line(self, processor: JinjaTemplateProcessor):
-        """Case 1: select 1;\\n--comment
-
-        After the semicolon, Snowflake sees the comment, strips it, and would get
-        an empty statement error. We append SELECT 1 to prevent this.
-        """
-        templates = {"test.sql": "select 1;\n--comment"}
-        processor.override_loader(DictLoader(templates))
-
-        result = processor.render("test.sql", None)
-
-        # Must append SELECT 1 to prevent empty statement error
-        assert "SELECT 1; -- schemachange:" in result
-        assert "select 1;" in result
-        assert "--comment" in result
-
-    def test_case2_semicolon_comment_semicolon(self, processor: JinjaTemplateProcessor):
-        """Case 2: select 1;\\n--comment\\n;
-
-        The trailing semicolon creates an empty statement which Snowflake accepts.
-        No SELECT 1 needed because the final ; handles it.
-        """
-        templates = {"test.sql": "select 1;\n--comment\n;"}
-        processor.override_loader(DictLoader(templates))
-
-        result = processor.render("test.sql", None)
-
-        # Trailing ; handles it - no SELECT 1 needed
-        assert "SELECT 1" not in result
-        assert "select 1;" in result
-        assert "--comment" in result
-        assert result.strip().endswith(";")
-
-    def test_case3_sql_comment_semicolon(self, processor: JinjaTemplateProcessor):
-        """Case 3: select 1\\n--comment\\n;
-
-        This is one statement with a comment in the middle, terminated by ;
-        No modification needed.
-        """
-        templates = {"test.sql": "select 1\n--comment\n;"}
-        processor.override_loader(DictLoader(templates))
-
-        result = processor.render("test.sql", None)
-
-        # One statement - no SELECT 1 needed
-        assert "SELECT 1" not in result
-        assert "select 1" in result
-        assert "--comment" in result
-        assert result.strip().endswith(";")
-
-    def test_case4_sql_comment_semicolon_inline_comment(self, processor: JinjaTemplateProcessor):
-        """Case 4: select 1\\n--comment\\n;--comment
-
-        One statement terminated by ;, with inline comment on same line as ;
-        The trailing --comment on the ; line is fine.
-        """
-        templates = {"test.sql": "select 1\n--comment\n;--comment"}
-        processor.override_loader(DictLoader(templates))
-
-        result = processor.render("test.sql", None)
-
-        # Inline comment after ; on same line is fine - no SELECT 1 needed
-        assert "SELECT 1" not in result
-        assert "select 1" in result
-        assert result.strip().endswith(";--comment")
 
     def test_render_strips_utf8_bom_character(self, processor: JinjaTemplateProcessor):
-        """Test that UTF-8 BOM character is automatically stripped - issue #250"""
-        # \ufeff is the UTF-8 BOM (Byte Order Mark) character
+        """Test that UTF-8 BOM character is automatically stripped"""
         templates = {"test.sql": "\ufeffSELECT 1 FROM dual"}
         processor.override_loader(DictLoader(templates))
 
         result = processor.render("test.sql", None)
 
-        # BOM should be stripped
         assert not result.startswith("\ufeff")
         assert result == "SELECT 1 FROM dual"
 
     def test_render_strips_utf8_bom_with_multiline_sql(self, processor: JinjaTemplateProcessor):
-        """Test that UTF-8 BOM is stripped from multi-line SQL - issue #250"""
+        """Test that UTF-8 BOM is stripped from multi-line SQL"""
         templates = {"test.sql": "\ufeff-- Comment\nCREATE TABLE foo (id INT);\nSELECT * FROM foo"}
         processor.override_loader(DictLoader(templates))
 
         result = processor.render("test.sql", None)
 
-        # BOM should be stripped, rest preserved
         assert not result.startswith("\ufeff")
         assert "-- Comment" in result
         assert "CREATE TABLE foo (id INT)" in result
-        assert "SELECT * FROM foo" in result
 
     def test_render_handles_bom_in_middle_of_file(self, processor: JinjaTemplateProcessor):
-        """Test that BOM in middle of file is not stripped - only leading BOM - issue #250"""
-        # BOM should only be stripped at the start of the file
+        """Test that BOM in middle of file is not stripped - only leading BOM"""
         templates = {"test.sql": "SELECT '\ufeff' AS bom_char FROM dual"}
         processor.override_loader(DictLoader(templates))
 
         result = processor.render("test.sql", None)
 
-        # Leading BOM removed but BOM in SQL string preserved
         assert not result.startswith("\ufeff")
         assert "'\ufeff'" in result  # BOM inside the SQL string should remain

@@ -4,8 +4,12 @@ All notable changes to this project will be documented in this file.
 *The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).*
 
 ## [4.3.0] - TBD
+### Changed
+- **Breaking**: Reverted 4.2.0 trailing comment handling - schemachange no longer appends `SELECT 1;` to scripts with trailing comments (#406, #258)
+- Scripts with trailing comments after `;` may cause "Empty SQL Statement" errors in Snowflake - place comments before the final `;` or on the same line
+
 ### Fixed
-- Trailing comment handling regression from 4.2.0 (#406, #258)
+- Regression from 4.2.0 where comment handling broke valid SQL scripts (#406)
 
 
 ## [4.2.0] - 2026-01-02

@@ -364,20 +364,21 @@ export SNOWFLAKE_PASSWORD="my_password"
 
 ---
 
-### Error: `Script rendered to empty SQL content` or `Script contains only SQL comments` (Issue #258)
+### Error: `Script rendered to empty content` or `Script contains only comments or semicolons` (Issue #258)
 
-**Root Cause:** After Jinja template processing, the script contains only whitespace or comments.
+**Root Cause:** After Jinja template processing, the script contains only whitespace, comments, or semicolons.
 
 **How Schemachange Handles This:**
-- ✅ **SQL + comments before `;`**: Passes through unchanged (e.g., `SELECT 1\n-- comment\n;`)
-- ✅ **SQL with trailing comments after `;`**: Auto-appends `SELECT 1;` to prevent empty statement error
+- ✅ **Valid SQL**: Passes through unchanged
 - ❌ **Comment-only or empty scripts**: Raises clear error with debugging info
+- ⚠️ **Trailing comments after `;`**: May cause "Empty SQL Statement" error in Snowflake
 
 **Common Scenarios:**
 1. All Jinja conditionals evaluate to false
 2. Comment-only files (TODOs, placeholders)
 3. Missing or incorrect template variables
 4. File contains only whitespace or semicolons after rendering
+5. Trailing comments after the final `;` (e.g., `SELECT 1;\n-- comment`)
 
 **Solutions:**
 
@@ -412,25 +413,22 @@ export SNOWFLAKE_PASSWORD="my_password"
    - Test locally with same variables to reproduce
    - Check file encoding (UTF-8 without BOM) and line endings
 
-**Error Message Details:**
+5. **Avoid trailing comments after `;`:**
+   ```sql
+   -- ❌ BAD: May cause "Empty SQL Statement" error
+   SELECT * FROM table;
+   -- trailing comment
 
-The error includes helpful debugging information:
-- Raw content preview (first 500 chars)
-- List of variables provided
-- Specific fix suggestions
+   -- ✅ GOOD: Comment before semicolon
+   SELECT * FROM table
+   -- trailing comment
+   ;
 
-**Example:**
-```
-ValueError: Script 'V1.0__my_script.sql' rendered to empty SQL content after Jinja processing.
-This can happen when:
-  1. The file contains only whitespace
-  2. All Jinja conditional blocks evaluate to false
-  3. Template variables are missing or incorrect
-  4. The file contains only a semicolon after rendering
+   -- ✅ GOOD: Inline comment on same line as semicolon
+   SELECT * FROM table; -- inline comment
+   ```
 
-Raw content preview: [shows your content]
-Provided variables: ['env', 'feature_flag']
-```
+**Note:** Schemachange passes SQL through unchanged and does not modify trailing comments. If Snowflake reports "Empty SQL Statement", restructure your comments as shown above.
 
 ---
 
