@@ -370,15 +370,15 @@ export SNOWFLAKE_PASSWORD="my_password"
 
 **How Schemachange Handles This:**
 - ✅ **Valid SQL**: Passes through unchanged
+- ✅ **Trailing comments on new lines after `;`**: Auto-appends `SELECT 1;` to prevent empty statement error
+- ✅ **Inline comments on same line as `;`**: Passes through unchanged (Snowflake handles fine)
 - ❌ **Comment-only or empty scripts**: Raises clear error with debugging info
-- ⚠️ **Trailing comments after `;`**: May cause "Empty SQL Statement" error in Snowflake
 
 **Common Scenarios:**
 1. All Jinja conditionals evaluate to false
 2. Comment-only files (TODOs, placeholders)
 3. Missing or incorrect template variables
 4. File contains only whitespace or semicolons after rendering
-5. Trailing comments after the final `;` (e.g., `SELECT 1;\n-- comment`)
 
 **Solutions:**
 
@@ -413,22 +413,7 @@ export SNOWFLAKE_PASSWORD="my_password"
    - Test locally with same variables to reproduce
    - Check file encoding (UTF-8 without BOM) and line endings
 
-5. **Avoid trailing comments after `;`:**
-   ```sql
-   -- ❌ BAD: May cause "Empty SQL Statement" error
-   SELECT * FROM table;
-   -- trailing comment
-
-   -- ✅ GOOD: Comment before semicolon
-   SELECT * FROM table
-   -- trailing comment
-   ;
-
-   -- ✅ GOOD: Inline comment on same line as semicolon
-   SELECT * FROM table; -- inline comment
-   ```
-
-**Note:** Schemachange passes SQL through unchanged and does not modify trailing comments. If Snowflake reports "Empty SQL Statement", restructure your comments as shown above.
+**Note:** Schemachange automatically handles trailing comments on new lines after the final `;` by appending `SELECT 1;` to prevent "Empty SQL Statement" errors.
 
 ---
 

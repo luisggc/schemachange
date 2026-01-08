@@ -73,6 +73,57 @@ class JinjaTemplateProcessor:
                 f"Script '{script}' contains only comments or semicolons. Add SQL statements or remove the script."
             )
 
+        # Handle trailing comments after last semicolon (issue #258, #406)
+        # When content after the last ; is only whitespace/comments, Snowflake's
+        # execute_string() sees it as a new empty statement and errors.
+        content = self._handle_trailing_comments(content, script)
+
+        return content
+
+    def _handle_trailing_comments(self, content: str, script: str) -> str:
+        """Append SELECT 1; if there are trailing comments on NEW LINES after the last semicolon.
+
+        Snowflake's execute_string() splits on semicolons. If there's content after
+        the last ; that is only whitespace/comments ON NEW LINES, Snowflake strips
+        the comments and tries to execute an empty string, causing "Empty SQL Statement".
+
+        Inline comments on the same line as ; are fine (e.g., "SELECT 1; -- comment")
+        Only comments on separate lines after ; cause the error.
+
+        This method detects that specific case and appends a no-op SELECT 1;
+        """
+        # Find the last semicolon
+        last_semicolon_idx = content.rfind(";")
+        if last_semicolon_idx == -1:
+            # No semicolon in content - Snowflake executes as single statement
+            return content
+
+        # Get content after the last semicolon
+        after_semicolon = content[last_semicolon_idx + 1 :]
+
+        # Only problematic if there's a newline after the semicolon
+        # Inline comments on the same line as ; are handled fine by Snowflake
+        if "\n" not in after_semicolon:
+            return content
+
+        # Check if content after ; is only whitespace and/or comments
+        after_stripped = after_semicolon
+        # Remove single-line comments
+        after_stripped = re.sub(r"--[^\n]*", "", after_stripped)
+        # Remove multi-line comments
+        after_stripped = re.sub(r"/\*.*?\*/", "", after_stripped, flags=re.DOTALL)
+        # Remove whitespace
+        after_stripped = after_stripped.strip()
+
+        if not after_stripped and after_semicolon.strip():
+            # There IS content after ; on new lines, but it's only comments
+            # Append SELECT 1; to prevent empty statement error
+            logger.debug(
+                "Appending SELECT 1; to handle trailing comments after last semicolon",
+                script=script,
+            )
+            content = content.rstrip() + "\nSELECT 1; -- schemachange: trailing comment fix"
+
         return content
 
     def relpath(self, file_path: Path):

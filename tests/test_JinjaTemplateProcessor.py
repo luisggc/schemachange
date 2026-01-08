@@ -205,19 +205,22 @@ class TestJinjaTemplateProcessor:
 
         assert result == "SELECT 1 /* inline comment */ FROM dual"
 
-    def test_render_valid_sql_with_trailing_comment_passes_through(self, processor: JinjaTemplateProcessor):
-        """Test that SQL with trailing comment passes through unchanged.
+    def test_render_trailing_comment_after_semicolon_appends_select1(self, processor: JinjaTemplateProcessor):
+        """Test that SQL with trailing comment AFTER semicolon gets SELECT 1; appended.
 
-        NOTE: This may cause "Empty SQL Statement" error in Snowflake.
-        Users should place comments before the final semicolon.
+        Issue #258, #406: Snowflake's execute_string() sees content after ; as a new
+        statement. If it's only comments, Snowflake strips them and gets empty string.
+        schemachange appends SELECT 1; to prevent this error.
         """
         templates = {"test.sql": "CREATE TABLE foo (id INT);\n-- Author: John Doe"}
         processor.override_loader(DictLoader(templates))
 
         result = processor.render("test.sql", None)
 
-        # Content passes through unchanged - schemachange does NOT modify SQL
-        assert result == "CREATE TABLE foo (id INT);\n-- Author: John Doe"
+        # SELECT 1; appended to handle trailing comment
+        assert "CREATE TABLE foo (id INT);" in result
+        assert "-- Author: John Doe" in result
+        assert "SELECT 1; -- schemachange: trailing comment fix" in result
 
     def test_render_multistatement_sql_passes_through(self, processor: JinjaTemplateProcessor):
         """Test that multi-statement SQL passes through unchanged"""
@@ -246,6 +249,110 @@ class TestJinjaTemplateProcessor:
 
         assert "CREATE TABLE dev_table (id INT)" in context
         assert "prod_table" not in context
+
+    # ============================================================
+    # Trailing comment handling tests - issue #258, #406
+    # Demo files: A__trailing_comment_after_semicolon.sql,
+    #             A__comment_before_semicolon.sql,
+    #             A__inline_comment_with_semicolon.sql
+    # ============================================================
+
+    def test_render_comment_before_semicolon_unchanged(self, processor: JinjaTemplateProcessor):
+        """Test that comment BEFORE semicolon passes through unchanged.
+
+        Pattern: SQL\n-- comment\n;
+        This is valid Snowflake syntax - the ; terminates everything including comments.
+        No modification needed.
+        """
+        templates = {"test.sql": "SELECT 1\n-- comment before semicolon\n;"}
+        processor.override_loader(DictLoader(templates))
+
+        result = processor.render("test.sql", None)
+
+        # No modification - semicolon is the last character
+        assert result == "SELECT 1\n-- comment before semicolon\n;"
+        assert "SELECT 1; -- schemachange" not in result
+
+    def test_render_inline_comment_with_semicolon_unchanged(self, processor: JinjaTemplateProcessor):
+        """Test that inline comment on same line as semicolon passes through unchanged.
+
+        Pattern: SQL; -- comment
+        This is valid Snowflake syntax - nothing comes after the semicolon.
+        No modification needed.
+        """
+        templates = {"test.sql": "SELECT 1; -- inline comment"}
+        processor.override_loader(DictLoader(templates))
+
+        result = processor.render("test.sql", None)
+
+        # No modification - inline comment on same line as ;
+        assert result == "SELECT 1; -- inline comment"
+        assert "SELECT 1; -- schemachange" not in result
+
+    def test_render_multiline_trailing_comment_appends_select1(self, processor: JinjaTemplateProcessor):
+        """Test that multi-line block comment after semicolon gets SELECT 1; appended."""
+        templates = {"test.sql": "CREATE TABLE bar (id INT);\n/* Metadata\nblock */"}
+        processor.override_loader(DictLoader(templates))
+
+        result = processor.render("test.sql", None)
+
+        assert "CREATE TABLE bar (id INT);" in result
+        assert "/* Metadata\nblock */" in result
+        assert "SELECT 1; -- schemachange: trailing comment fix" in result
+
+    def test_render_multiple_trailing_comments_appends_select1(self, processor: JinjaTemplateProcessor):
+        """Test that multiple trailing comments after semicolon gets SELECT 1; appended."""
+        templates = {"test.sql": "SELECT 1;\n-- comment 1\n-- comment 2\n-- comment 3"}
+        processor.override_loader(DictLoader(templates))
+
+        result = processor.render("test.sql", None)
+
+        assert "SELECT 1;" in result
+        assert "-- comment 1" in result
+        assert "-- comment 2" in result
+        assert "-- comment 3" in result
+        assert "SELECT 1; -- schemachange: trailing comment fix" in result
+
+    def test_render_no_semicolon_with_trailing_comment_unchanged(self, processor: JinjaTemplateProcessor):
+        """Test that SQL without semicolon and trailing comment passes through unchanged.
+
+        When there's no semicolon, Snowflake executes the whole thing as one statement.
+        The comment is part of the statement - no modification needed.
+        """
+        templates = {"test.sql": "SELECT 1\n-- trailing comment"}
+        processor.override_loader(DictLoader(templates))
+
+        result = processor.render("test.sql", None)
+
+        # No semicolon, so no modification
+        assert result == "SELECT 1\n-- trailing comment"
+        assert "SELECT 1; -- schemachange" not in result
+
+    def test_render_sql_ending_with_semicolon_only_unchanged(self, processor: JinjaTemplateProcessor):
+        """Test that SQL ending with just semicolon (no trailing content) passes through unchanged."""
+        templates = {"test.sql": "CREATE TABLE foo (id INT);"}
+        processor.override_loader(DictLoader(templates))
+
+        result = processor.render("test.sql", None)
+
+        # No trailing content after ;
+        assert result == "CREATE TABLE foo (id INT);"
+        assert "SELECT 1; -- schemachange" not in result
+
+    def test_render_whitespace_only_after_semicolon_unchanged(self, processor: JinjaTemplateProcessor):
+        """Test that whitespace-only after semicolon passes through unchanged.
+
+        Whitespace after ; is not a problem - Snowflake handles it fine.
+        Only comments cause the "Empty SQL Statement" error.
+        """
+        templates = {"test.sql": "SELECT 1;\n\n\n"}
+        processor.override_loader(DictLoader(templates))
+
+        result = processor.render("test.sql", None)
+
+        # Whitespace is stripped, no SELECT 1; added
+        assert result == "SELECT 1;"
+        assert "SELECT 1; -- schemachange" not in result
 
     # ============================================================
     # UTF-8 BOM handling tests - issue #250
