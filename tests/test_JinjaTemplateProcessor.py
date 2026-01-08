@@ -354,6 +354,39 @@ class TestJinjaTemplateProcessor:
         assert result == "SELECT 1;"
         assert "SELECT 1; -- schemachange" not in result
 
+    def test_render_semicolon_in_comment_ignored(self, processor: JinjaTemplateProcessor):
+        """Test that semicolons INSIDE comments are ignored when finding last real semicolon.
+
+        This is a regression test - semicolons in comment text (e.g., "SELECT 1;")
+        should not be detected as the last semicolon in the file.
+        """
+        templates = {
+            "test.sql": """CREATE TABLE foo (id INT);
+-- This comment mentions SELECT 1; but it's in a comment
+-- Another comment with semicolon; here"""
+        }
+        processor.override_loader(DictLoader(templates))
+
+        result = processor.render("test.sql", None)
+
+        # The real last semicolon is after "CREATE TABLE foo (id INT)"
+        # The trailing comments should trigger SELECT 1; append
+        assert "SELECT 1; -- schemachange: trailing comment fix" in result
+
+    def test_render_semicolon_in_block_comment_ignored(self, processor: JinjaTemplateProcessor):
+        """Test that semicolons inside block comments are ignored."""
+        templates = {
+            "test.sql": """SELECT * FROM bar;
+/* This block comment has SELECT 1; inside it */"""
+        }
+        processor.override_loader(DictLoader(templates))
+
+        result = processor.render("test.sql", None)
+
+        # The real last semicolon is after "SELECT * FROM bar"
+        # The trailing block comment should trigger SELECT 1; append
+        assert "SELECT 1; -- schemachange: trailing comment fix" in result
+
     # ============================================================
     # UTF-8 BOM handling tests - issue #250
     # ============================================================

@@ -80,6 +80,42 @@ class JinjaTemplateProcessor:
 
         return content
 
+    def _find_last_real_semicolon(self, content: str) -> int:
+        """Find the last semicolon that is NOT inside a comment.
+
+        Returns the index of the last real semicolon, or -1 if none found.
+        """
+        # Track whether we're inside a comment
+        i = 0
+        last_real_semicolon = -1
+
+        while i < len(content):
+            # Check for single-line comment start
+            if content[i : i + 2] == "--":
+                # Skip to end of line
+                newline_idx = content.find("\n", i)
+                if newline_idx == -1:
+                    break  # Rest of content is a comment
+                i = newline_idx + 1
+                continue
+
+            # Check for multi-line comment start
+            if content[i : i + 2] == "/*":
+                # Skip to end of comment
+                end_idx = content.find("*/", i + 2)
+                if end_idx == -1:
+                    break  # Rest of content is a comment
+                i = end_idx + 2
+                continue
+
+            # Check for semicolon (not in a comment)
+            if content[i] == ";":
+                last_real_semicolon = i
+
+            i += 1
+
+        return last_real_semicolon
+
     def _handle_trailing_comments(self, content: str, script: str) -> str:
         """Append SELECT 1; if there are trailing comments on NEW LINES after the last semicolon.
 
@@ -92,13 +128,13 @@ class JinjaTemplateProcessor:
 
         This method detects that specific case and appends a no-op SELECT 1;
         """
-        # Find the last semicolon
-        last_semicolon_idx = content.rfind(";")
+        # Find the last semicolon that's NOT inside a comment
+        last_semicolon_idx = self._find_last_real_semicolon(content)
         if last_semicolon_idx == -1:
             # No semicolon in content - Snowflake executes as single statement
             return content
 
-        # Get content after the last semicolon
+        # Get content after the last real semicolon
         after_semicolon = content[last_semicolon_idx + 1 :]
 
         # Only problematic if there's a newline after the semicolon
