@@ -5,6 +5,7 @@ import re
 
 import structlog
 
+from schemachange.cli_script_executor import execute_cli_script
 from schemachange.config.DeployConfig import DeployConfig
 from schemachange.JinjaTemplateProcessor import JinjaTemplateProcessor
 from schemachange.session.Script import get_all_scripts_recursively
@@ -135,12 +136,35 @@ def deploy(config: DeployConfig, session: SnowflakeSession):
                 scripts_skipped += 1
                 continue
 
-        session.apply_change_script(
-            script=script,
-            script_content=content,
-            dry_run=config.dry_run,
-            logger=script_log,
-        )
+        # Execute the script based on its format (SQL or CLI)
+        if script.format == "CLI":
+            # Execute CLI script via subprocess
+            script_log.info("Applying CLI migration script")
+            execution_time = execute_cli_script(
+                script=script,
+                content=content,
+                root_folder=config.root_folder,
+                dry_run=config.dry_run,
+                log=script_log,
+            )
+
+            # Record in change history (unless dry run)
+            if not config.dry_run:
+                session.record_change_history(
+                    script=script,
+                    checksum=checksum_current,
+                    execution_time=execution_time,
+                    status="Success",
+                    logger=script_log,
+                )
+        else:
+            # Execute SQL script via Snowflake session
+            session.apply_change_script(
+                script=script,
+                script_content=content,
+                dry_run=config.dry_run,
+                logger=script_log,
+            )
 
         scripts_applied += 1
 

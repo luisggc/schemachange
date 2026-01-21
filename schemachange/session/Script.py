@@ -21,6 +21,7 @@ T = TypeVar("T", bound="Script")
 class Script(ABC):
     pattern: ClassVar[Pattern[str]]
     type: ClassVar[Literal["V", "R", "A"]]
+    format: ClassVar[Literal["SQL", "CLI"]] = "SQL"
     name: str
     file_path: Path
     description: str
@@ -90,6 +91,79 @@ class AlwaysScript(Script):
     type: ClassVar[Literal["A"]] = "A"
 
 
+# CLI Script classes for .cli.yml files
+# These follow the same V/R/A versioning conventions but execute CLI commands instead of SQL
+
+
+@dataclasses.dataclass(frozen=True)
+class VersionedCLIScript(Script):
+    """Versioned CLI migration script (.cli.yml)"""
+
+    pattern: ClassVar[re.Pattern[str]] = re.compile(
+        r"^(V)(?P<version>([^_]|_(?!_))+)?(?P<separator>_{1,2})(?P<description>.+?)\.cli\.yml(\.jinja)?$",
+        re.IGNORECASE,
+    )
+    type: ClassVar[Literal["V"]] = "V"
+    format: ClassVar[Literal["CLI"]] = "CLI"
+    version_number_regex: ClassVar[str | None] = None
+    version: str
+
+    @classmethod
+    def from_path(cls: T, file_path: Path, **kwargs) -> T:
+        name_parts = cls.pattern.search(file_path.name.strip())
+
+        version = name_parts.group("version")
+        if version is None:
+            raise ValueError(f"Versioned CLI migrations must be prefixed with a version: {str(file_path)}")
+
+        if cls.version_number_regex:
+            if re.search(cls.version_number_regex, version, re.IGNORECASE) is None:
+                raise ValueError(
+                    f"CLI script version doesn't match the supplied regular expression: "
+                    f"{cls.version_number_regex}\n{str(file_path)}"
+                )
+
+        return super().from_path(file_path=file_path, version=name_parts.group("version"))
+
+
+@dataclasses.dataclass(frozen=True)
+class RepeatableCLIScript(Script):
+    """Repeatable CLI migration script (.cli.yml)"""
+
+    pattern: ClassVar[re.Pattern[str]] = re.compile(
+        r"^(R)(?P<separator>_{1,2})(?P<description>.+?)\.cli\.yml(\.jinja)?$",
+        re.IGNORECASE,
+    )
+    type: ClassVar[Literal["R"]] = "R"
+    format: ClassVar[Literal["CLI"]] = "CLI"
+
+
+@dataclasses.dataclass(frozen=True)
+class AlwaysCLIScript(Script):
+    """Always-run CLI migration script (.cli.yml)"""
+
+    pattern: ClassVar[re.Pattern[str]] = re.compile(
+        r"^(A)(?P<separator>_{1,2})(?P<description>.+?)\.cli\.yml(\.jinja)?$",
+        re.IGNORECASE,
+    )
+    type: ClassVar[Literal["A"]] = "A"
+    format: ClassVar[Literal["CLI"]] = "CLI"
+
+
+def cli_script_factory(file_path: Path) -> T | None:
+    """Factory function to create CLI script objects from file paths."""
+    if VersionedCLIScript.pattern.search(file_path.name.strip()) is not None:
+        return VersionedCLIScript.from_path(file_path=file_path)
+
+    elif RepeatableCLIScript.pattern.search(file_path.name.strip()) is not None:
+        return RepeatableCLIScript.from_path(file_path=file_path)
+
+    elif AlwaysCLIScript.pattern.search(file_path.name.strip()) is not None:
+        return AlwaysCLIScript.from_path(file_path=file_path)
+
+    return None
+
+
 def script_factory(
     file_path: Path,
 ) -> T | None:
@@ -107,18 +181,29 @@ def script_factory(
 
 def get_all_scripts_recursively(root_directory: Path, version_number_regex: str | None = None):
     VersionedScript.version_number_regex = version_number_regex
+    VersionedCLIScript.version_number_regex = version_number_regex
 
     all_files: dict[str, T] = {}
     all_versions = []
     # Walk the entire directory structure recursively
+    # Match both SQL scripts (.sql, .sql.jinja) and CLI scripts (.cli.yml, .cli.yml.jinja)
     sql_pattern = re.compile(r"\.sql(\.jinja)?$", flags=re.IGNORECASE)
+    cli_pattern = re.compile(r"\.cli\.yml(\.jinja)?$", flags=re.IGNORECASE)
+
     file_paths = root_directory.glob("**/*")
     for file_path in file_paths:
         if file_path.is_dir():
             continue
-        if not sql_pattern.search(file_path.name.strip()):
+
+        # Determine script type and use appropriate factory
+        script: T | None = None
+        if cli_pattern.search(file_path.name.strip()):
+            script = cli_script_factory(file_path=file_path)
+        elif sql_pattern.search(file_path.name.strip()):
+            script = script_factory(file_path=file_path)
+        else:
             continue
-        script = script_factory(file_path=file_path)
+
         if script is None:
             continue
 

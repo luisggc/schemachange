@@ -1,0 +1,7 @@
+steps:
+  - cli: snow
+    command: sql
+    args:
+      - "--help"
+    working_dir: ./demo/cli_demo
+    description: "Test CLI"

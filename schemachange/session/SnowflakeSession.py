@@ -11,7 +11,14 @@ import structlog
 from schemachange.config.ChangeHistoryTable import ChangeHistoryTable
 from schemachange.config.utils import get_snowflake_identifier_string
 from schemachange.ScriptExecutionError import ScriptExecutionError
-from schemachange.session.Script import AlwaysScript, RepeatableScript, VersionedScript
+from schemachange.session.Script import (
+    AlwaysCLIScript,
+    AlwaysScript,
+    RepeatableCLIScript,
+    RepeatableScript,
+    VersionedCLIScript,
+    VersionedScript,
+)
 
 
 class SnowflakeSession:
@@ -453,7 +460,12 @@ class SnowflakeSession:
 
     def apply_change_script(
         self,
-        script: VersionedScript | RepeatableScript | AlwaysScript,
+        script: VersionedScript
+        | RepeatableScript
+        | AlwaysScript
+        | VersionedCLIScript
+        | RepeatableCLIScript
+        | AlwaysCLIScript,
         script_content: str,
         dry_run: bool,
         logger: structlog.BoundLogger,
@@ -541,7 +553,44 @@ class SnowflakeSession:
             end = time.time()
             execution_time = round(end - start)
 
-        # Compose and execute the insert statement to the log file
+        # Record the script execution in change history
+        self.record_change_history(
+            script=script,
+            checksum=checksum,
+            execution_time=execution_time,
+            status=status,
+            logger=logger,
+        )
+
+    def record_change_history(
+        self,
+        script: VersionedScript
+        | RepeatableScript
+        | AlwaysScript
+        | VersionedCLIScript
+        | RepeatableCLIScript
+        | AlwaysCLIScript,
+        checksum: str,
+        execution_time: int,
+        status: str,
+        logger: structlog.BoundLogger,
+    ) -> None:
+        """
+        Record a script execution in the change history table.
+
+        This method is used by both SQL scripts (via apply_change_script) and
+        CLI scripts (called directly from deploy.py after CLI execution).
+
+        Args:
+            script: The script that was executed
+            checksum: SHA-224 checksum of the rendered script content
+            execution_time: Execution time in seconds
+            status: Execution status (e.g., "Success")
+            logger: Logger instance for this operation
+        """
+        if self.change_history_table is None:
+            raise ValueError("change_history_table is required for deployment operations")
+
         query = f"""\
             INSERT INTO {self.change_history_table.fully_qualified} (
                 VERSION,
