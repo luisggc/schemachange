@@ -1,9 +1,16 @@
 config-version: 1
 
-# Demo phase creates its own change history table in the test schema (separate from setup/teardown tracking)
-#change-history-table: "{{ env_var('SNOWFLAKE_DATABASE')}}.{{ env_var('MY_TARGET_SCHEMA')}}.CHANGE_HISTORY"
-#create-change-history-table: true
+# Root folder containing migration scripts
+root-folder: "."
 
-#vars:
-#  database_name: "{{env_var('SNOWFLAKE_DATABASE')}}"
-#  schema_name: "{{env_var('MY_TARGET_SCHEMA')}}"
+# For dry-run testing, we still need a change history table defined
+# (it won't actually be created/used in dry-run mode)
+change-history-table: "DEMO_DB.PUBLIC.CHANGE_HISTORY"
+#change-history-table: "TEST_DB.PUBLIC.CHANGE_HISTORY"
+create-change-history-table: true
+
+# Minimal Snowflake config for dry-run (won't actually connect)
+# You can also set these as environment variables:
+#   export SNOWFLAKE_ACCOUNT=your_account
+#   export SNOWFLAKE_USER=your_user
+#   export SNOWFLAKE_DATABASE=TEST_DB

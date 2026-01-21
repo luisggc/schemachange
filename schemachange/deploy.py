@@ -139,7 +139,6 @@ def deploy(config: DeployConfig, session: SnowflakeSession):
         # Execute the script based on its format (SQL or CLI)
         if script.format == "CLI":
             # Execute CLI script via subprocess
-            script_log.info("Applying CLI migration script")
             execution_time = execute_cli_script(
                 script=script,
                 content=content,

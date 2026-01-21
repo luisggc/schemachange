@@ -11,12 +11,54 @@ import structlog
 from schemachange.cli_script_executor import (
     ALLOWED_CLI_TOOLS,
     CLIStep,
+    _resolve_cli_tool,
     execute_cli_script,
     execute_cli_step,
     parse_cli_script,
 )
 from schemachange.CLIScriptExecutionError import CLIScriptExecutionError
 from schemachange.session.Script import VersionedCLIScript
+
+# Mock snow path for tests
+MOCK_SNOW_PATH = "/usr/local/bin/snow"
+
+
+@pytest.fixture(autouse=True)
+def mock_shutil_which():
+    """Mock shutil.which to return a consistent path for 'snow'."""
+    with patch("schemachange.cli_script_executor.shutil.which") as mock_which:
+        mock_which.return_value = MOCK_SNOW_PATH
+        yield mock_which
+
+
+class TestResolveCLITool:
+    def test_resolve_simple_name(self, mock_shutil_which):
+        result = _resolve_cli_tool("snow")
+        assert result == MOCK_SNOW_PATH
+        mock_shutil_which.assert_called_once_with("snow")
+
+    def test_resolve_full_path(self, mock_shutil_which):
+        with patch("schemachange.cli_script_executor.Path.exists", return_value=True):
+            result = _resolve_cli_tool("/custom/path/to/snow")
+        assert result == "/custom/path/to/snow"
+        mock_shutil_which.assert_not_called()
+
+    def test_resolve_unsupported_tool_raises_error(self, mock_shutil_which):
+        with pytest.raises(ValueError) as e:
+            _resolve_cli_tool("unsupported_tool")
+        assert "not supported" in str(e.value)
+
+    def test_resolve_tool_not_found_raises_error(self, mock_shutil_which):
+        mock_shutil_which.return_value = None
+        with pytest.raises(ValueError) as e:
+            _resolve_cli_tool("snow")
+        assert "not found in PATH" in str(e.value)
+
+    def test_resolve_full_path_not_exists_raises_error(self, mock_shutil_which):
+        with patch("schemachange.cli_script_executor.Path.exists", return_value=False):
+            with pytest.raises(ValueError) as e:
+                _resolve_cli_tool("/nonexistent/path/snow")
+        assert "does not exist" in str(e.value)
 
 
 class TestCLIStep:
@@ -25,27 +67,33 @@ class TestCLIStep:
         step = CLIStep.from_dict(data, Path("/root"))
 
         assert step.cli == "snow"
+        assert step.cli_path == MOCK_SNOW_PATH
         assert step.command == "app deploy"
         assert step.args == ()
         assert step.working_dir is None
         assert step.env is None
         assert step.description is None
 
-    def test_from_dict_full(self):
+    def test_from_dict_full(self, tmp_path):
+        # Create a real directory for working_dir validation
+        working_dir = tmp_path / "my-app"
+        working_dir.mkdir()
+
         data = {
             "cli": "snow",
             "command": "app deploy",
             "args": ["--prune", "--recursive"],
-            "working_dir": "./my-app",
+            "working_dir": str(working_dir),
             "env": {"MY_VAR": "value"},
             "description": "Deploy the app",
         }
-        step = CLIStep.from_dict(data, Path("/root"))
+        step = CLIStep.from_dict(data, tmp_path)
 
         assert step.cli == "snow"
+        assert step.cli_path == MOCK_SNOW_PATH
         assert step.command == "app deploy"
         assert step.args == ("--prune", "--recursive")
-        assert step.working_dir == Path("/root/my-app")
+        assert step.working_dir == working_dir
         assert step.env == {"MY_VAR": "value"}
         assert step.description == "Deploy the app"
 
@@ -74,6 +122,30 @@ class TestCLIStep:
         assert "not supported" in str(e.value)
         assert "unsupported_tool" in str(e.value)
 
+    def test_from_dict_nonexistent_working_dir_raises_error(self, tmp_path):
+        data = {
+            "cli": "snow",
+            "command": "app deploy",
+            "working_dir": "./nonexistent-dir",
+        }
+        with pytest.raises(ValueError) as e:
+            CLIStep.from_dict(data, tmp_path)
+        assert "does not exist" in str(e.value)
+
+    def test_from_dict_working_dir_is_file_raises_error(self, tmp_path):
+        # Create a file instead of a directory
+        file_path = tmp_path / "not-a-dir"
+        file_path.write_text("I'm a file")
+
+        data = {
+            "cli": "snow",
+            "command": "app deploy",
+            "working_dir": str(file_path),
+        }
+        with pytest.raises(ValueError) as e:
+            CLIStep.from_dict(data, tmp_path)
+        assert "is not a directory" in str(e.value)
+
 
 class TestParseCLIScript:
     def test_parse_valid_single_step(self):
@@ -88,7 +160,13 @@ steps:
         assert steps[0].cli == "snow"
         assert steps[0].command == "app deploy"
 
-    def test_parse_valid_multiple_steps(self):
+    def test_parse_valid_multiple_steps(self, tmp_path):
+        # Create directories for working_dir validation
+        app1_dir = tmp_path / "app1"
+        app1_dir.mkdir()
+        snowpark_dir = tmp_path / "snowpark"
+        snowpark_dir.mkdir()
+
         content = """
 steps:
   - cli: snow
@@ -98,11 +176,13 @@ steps:
     command: snowpark deploy
     working_dir: ./snowpark
 """
-        steps = parse_cli_script(content, Path("/root"))
+        steps = parse_cli_script(content, tmp_path)
 
         assert len(steps) == 2
         assert steps[0].command == "app deploy"
+        assert steps[0].working_dir == app1_dir
         assert steps[1].command == "snowpark deploy"
+        assert steps[1].working_dir == snowpark_dir
 
     def test_parse_invalid_yaml_raises_error(self):
         content = "this is not: valid: yaml: ::::"
@@ -164,7 +244,7 @@ class TestExecuteCLIStep:
         return structlog.get_logger()
 
     def test_dry_run_does_not_execute(self, mock_script, mock_logger):
-        step = CLIStep(cli="snow", command="app deploy")
+        step = CLIStep(cli="snow", cli_path=MOCK_SNOW_PATH, command="app deploy")
 
         with patch("schemachange.cli_script_executor.subprocess.run") as mock_run:
             result = execute_cli_step(step, 0, mock_script, dry_run=True, log=mock_logger)
@@ -173,7 +253,7 @@ class TestExecuteCLIStep:
         assert result is None
 
     def test_successful_execution(self, mock_script, mock_logger):
-        step = CLIStep(cli="snow", command="app deploy")
+        step = CLIStep(cli="snow", cli_path=MOCK_SNOW_PATH, command="app deploy")
 
         mock_result = MagicMock()
         mock_result.returncode = 0
@@ -187,7 +267,7 @@ class TestExecuteCLIStep:
         assert result.returncode == 0
 
     def test_failed_execution_raises_error(self, mock_script, mock_logger):
-        step = CLIStep(cli="snow", command="app deploy")
+        step = CLIStep(cli="snow", cli_path=MOCK_SNOW_PATH, command="app deploy")
 
         mock_result = MagicMock()
         mock_result.returncode = 1
@@ -203,7 +283,7 @@ class TestExecuteCLIStep:
         assert e.value.step_index == 0
 
     def test_cli_not_found_raises_error(self, mock_script, mock_logger):
-        step = CLIStep(cli="snow", command="app deploy")
+        step = CLIStep(cli="snow", cli_path=MOCK_SNOW_PATH, command="app deploy")
 
         with patch("schemachange.cli_script_executor.subprocess.run", side_effect=FileNotFoundError()):
             with pytest.raises(CLIScriptExecutionError) as e:
@@ -212,7 +292,7 @@ class TestExecuteCLIStep:
         assert "not found" in str(e.value.error_message)
 
     def test_step_with_working_dir(self, mock_script, mock_logger):
-        step = CLIStep(cli="snow", command="app deploy", working_dir=Path("/my/app"))
+        step = CLIStep(cli="snow", cli_path=MOCK_SNOW_PATH, command="app deploy", working_dir=Path("/my/app"))
 
         mock_result = MagicMock()
         mock_result.returncode = 0
@@ -226,7 +306,7 @@ class TestExecuteCLIStep:
         assert call_kwargs["cwd"] == Path("/my/app")
 
     def test_step_with_env_vars(self, mock_script, mock_logger):
-        step = CLIStep(cli="snow", command="app deploy", env={"MY_VAR": "value"})
+        step = CLIStep(cli="snow", cli_path=MOCK_SNOW_PATH, command="app deploy", env={"MY_VAR": "value"})
 
         mock_result = MagicMock()
         mock_result.returncode = 0

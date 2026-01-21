@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -21,11 +22,54 @@ logger = structlog.getLogger(__name__)
 ALLOWED_CLI_TOOLS = frozenset({"snow"})
 
 
+def _resolve_cli_tool(cli: str) -> str:
+    """
+    Resolve a CLI tool name or path to an executable path.
+
+    Validates that the tool is in ALLOWED_CLI_TOOLS (by basename if full path provided).
+    For simple names like 'snow', uses shutil.which() to find the full path.
+
+    Args:
+        cli: CLI tool name (e.g., 'snow') or full path (e.g., '/usr/bin/snow')
+
+    Returns:
+        Resolved path to the executable
+
+    Raises:
+        ValueError: If the tool is not in ALLOWED_CLI_TOOLS or not found
+    """
+    # Check if it's a path (contains path separator)
+    if os.sep in cli or (os.altsep and os.altsep in cli):
+        # It's a full/relative path - validate basename against allowed tools
+        basename = Path(cli).name
+        if basename not in ALLOWED_CLI_TOOLS:
+            raise ValueError(
+                f"CLI tool '{basename}' (from path '{cli}') is not supported. "
+                f"Allowed tools: {', '.join(sorted(ALLOWED_CLI_TOOLS))}"
+            )
+        # Verify the path exists
+        if not Path(cli).exists():
+            raise ValueError(f"CLI tool path '{cli}' does not exist")
+        return cli
+    else:
+        # It's a simple name - validate against allowed tools
+        if cli not in ALLOWED_CLI_TOOLS:
+            raise ValueError(
+                f"CLI tool '{cli}' is not supported. Allowed tools: {', '.join(sorted(ALLOWED_CLI_TOOLS))}"
+            )
+        # Resolve to full path using shutil.which
+        resolved = shutil.which(cli)
+        if resolved is None:
+            raise ValueError(f"CLI tool '{cli}' not found in PATH. Please ensure it is installed and accessible.")
+        return resolved
+
+
 @dataclasses.dataclass(frozen=True)
 class CLIStep:
     """Represents a single CLI command step in a CLI migration script."""
 
-    cli: str
+    cli: str  # Original CLI name from YAML (e.g., 'snow')
+    cli_path: str  # Resolved full path to executable
     command: str
     args: tuple[str, ...] = ()
     working_dir: Path | None = None
@@ -54,10 +98,8 @@ class CLIStep:
             raise ValueError("Step is missing required field 'command'")
 
         cli = data["cli"]
-        if cli not in ALLOWED_CLI_TOOLS:
-            raise ValueError(
-                f"CLI tool '{cli}' is not supported. Allowed tools: {', '.join(sorted(ALLOWED_CLI_TOOLS))}"
-            )
+        # Resolve and validate the CLI tool
+        cli_path = _resolve_cli_tool(cli)
 
         # Parse arguments
         args = data.get("args", [])
@@ -65,10 +107,14 @@ class CLIStep:
             args = [args]
         args = tuple(str(arg) for arg in args)
 
-        # Parse working directory (relative to root_folder)
+        # Parse working directory (relative to root_folder, resolved to absolute)
         working_dir = None
         if "working_dir" in data and data["working_dir"]:
-            working_dir = root_folder / data["working_dir"]
+            working_dir = (root_folder / data["working_dir"]).resolve()
+            if not working_dir.exists():
+                raise ValueError(f"Working directory '{working_dir}' does not exist")
+            if not working_dir.is_dir():
+                raise ValueError(f"Working directory '{working_dir}' is not a directory")
 
         # Parse environment variables
         env = None
@@ -77,6 +123,7 @@ class CLIStep:
 
         return cls(
             cli=cli,
+            cli_path=cli_path,
             command=data["command"],
             args=args,
             working_dir=working_dir,
@@ -151,9 +198,10 @@ def execute_cli_step(
     Raises:
         CLIScriptExecutionError: If the command fails
     """
-    # Build the full command
-    cmd_parts = [step.cli, *step.command.split(), *step.args]
-    cmd_str = " ".join(cmd_parts)
+    # Build the full command using the resolved path
+    cmd_parts = [step.cli_path, *step.command.split(), *step.args]
+    # Use original cli name for display/logging
+    cmd_str = " ".join([step.cli, *step.command.split(), *step.args])
 
     step_log = log.bind(
         step_index=step_index + 1,
@@ -170,6 +218,12 @@ def execute_cli_step(
         return None
 
     step_log.info("Executing CLI command", command=cmd_str)
+    step_log.debug(
+        "CLI execution details",
+        cli_path=step.cli_path,
+        cmd_parts=cmd_parts,
+        cwd=str(step.working_dir) if step.working_dir else None,
+    )
 
     # Prepare environment
     env = os.environ.copy()
@@ -191,12 +245,10 @@ def execute_cli_step(
 
         # Log output
         if result.stdout:
-            for line in result.stdout.strip().split("\n"):
-                step_log.debug("CLI stdout", output=line)
+            step_log.debug("CLI stdout", output=result.stdout.strip())
 
         if result.stderr:
-            for line in result.stderr.strip().split("\n"):
-                step_log.debug("CLI stderr", output=line)
+            step_log.debug("CLI stderr", output=result.stderr.strip())
 
         # Check for failure
         if result.returncode != 0:
@@ -223,12 +275,19 @@ def execute_cli_step(
         return result
 
     except FileNotFoundError as e:
-        step_log.error("CLI tool not found", cli=step.cli)
+        step_log.error(
+            "File not found during CLI execution",
+            cli=step.cli,
+            cli_path=step.cli_path,
+            cmd_parts=cmd_parts,
+            cwd=str(step.working_dir) if step.working_dir else None,
+            original_error=str(e),
+        )
         raise CLIScriptExecutionError(
             script_name=script.name,
             script_path=script.file_path,
             script_type=script.type,
-            error_message=f"CLI tool '{step.cli}' not found. Is it installed and in PATH?",
+            error_message=f"File not found during CLI execution: {e}. CLI path: {step.cli_path}, working_dir: {step.working_dir}",
             cli_tool=step.cli,
             command=cmd_str,
             step_index=step_index,

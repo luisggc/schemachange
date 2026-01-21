@@ -3,5 +3,5 @@ steps:
     command: sql
     args:
       - "--help"
-    working_dir: ./demo/cli_demo
+    working_dir: .
     description: "Test CLI"

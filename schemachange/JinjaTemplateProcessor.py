@@ -42,9 +42,9 @@ class JinjaTemplateProcessor:
         # to make unit testing easier
         self.__environment = jinja2.Environment(loader=loader, **self._env_args)
 
-    def _is_cli_script(self, script: str) -> bool:
+    def _is_cli_script(self, script: str | Path) -> bool:
         """Check if the script is a CLI migration file (.cli.yml)."""
-        script_lower = script.lower()
+        script_lower = str(script).lower()
         return script_lower.endswith(".cli.yml") or script_lower.endswith(".cli.yml.jinja")
 
     def render(self, script: str, variables: dict[str, Any] | None) -> str:
