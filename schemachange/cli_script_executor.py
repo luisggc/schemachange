@@ -217,7 +217,7 @@ def execute_cli_step(
         step_log.info("Dry run - would execute CLI command", command=cmd_str)
         return None
 
-    step_log.info("Executing CLI command", command=cmd_str)
+    step_log.debug("Executing CLI command", command=cmd_str)
     step_log.debug(
         "CLI execution details",
         cli_path=step.cli_path,
@@ -271,7 +271,7 @@ def execute_cli_step(
                 step_index=step_index,
             )
 
-        step_log.info("CLI command completed successfully", exit_code=0)
+        step_log.debug("CLI command completed successfully", exit_code=0)
         return result
 
     except FileNotFoundError as e:
@@ -306,6 +306,10 @@ def execute_cli_step(
             step_index=step_index,
             original_exception=e,
         ) from e
+
+    except CLIScriptExecutionError:
+        # Re-raise CLIScriptExecutionError without additional wrapping/logging
+        raise
 
     except Exception as e:
         step_log.error("Unexpected error executing CLI command", error=str(e))
@@ -350,7 +354,7 @@ def execute_cli_script(
         script_format="CLI",
     )
 
-    script_log.info("Executing CLI migration script")
+    script_log.info("Applying CLI change script")
 
     # Parse the YAML content
     try:
@@ -377,8 +381,8 @@ def execute_cli_script(
 
     execution_time = round(time.time() - start_time)
 
-    script_log.info(
-        "CLI migration script completed",
+    script_log.debug(
+        "CLI change script completed",
         steps_executed=len(steps),
         execution_time_seconds=execution_time,
     )

@@ -8,6 +8,7 @@ import snowflake.connector
 import structlog
 from structlog import BoundLogger
 
+from schemachange.CLIScriptExecutionError import CLIScriptExecutionError
 from schemachange.config.get_merged_config import get_merged_config
 from schemachange.config.RenderConfig import RenderConfig
 from schemachange.deploy import deploy
@@ -288,6 +289,24 @@ def main():
         if e.query:
             module_logger.debug("Failed SQL query", query=e.query)
         module_logger.debug("Script error details", **e.get_structured_error())
+
+        sys.exit(2)  # Exit code 2 for script errors
+
+    except CLIScriptExecutionError as e:
+        # CLI script execution failures - provide context without duplicating the error
+        module_logger.error(f"CLI script execution failed: {e.script_type} {e.script_name}")
+        module_logger.error(f"  Path: {e.script_path}")
+        if e.step_index is not None:
+            module_logger.error(f"  Failed at step: {e.step_index + 1}")
+        if e.cli_tool:
+            module_logger.error(f"  CLI tool: {e.cli_tool}")
+        if e.exit_code is not None:
+            module_logger.error(f"  Exit code: {e.exit_code}")
+        module_logger.error("")
+        module_logger.error("Troubleshooting: Check CLI tool installation, verify command syntax, or run with -L DEBUG")
+
+        # DEBUG level: show full structured data
+        module_logger.debug("CLI script error details", **e.get_structured_error())
 
         sys.exit(2)  # Exit code 2 for script errors
 

@@ -414,6 +414,7 @@ class SnowflakeSession:
         SELECT VERSION, SCRIPT, CHECKSUM
         FROM {self.change_history_table.fully_qualified}
         WHERE SCRIPT_TYPE = 'V'
+            AND STATUS = 'Success'
         ORDER BY INSTALLED_ON DESC
         """
         # Order by INSTALLED_ON (not VERSION) because version numbers are user-configured
@@ -480,7 +481,6 @@ class SnowflakeSession:
         # noinspection PyTypeChecker
         checksum = hashlib.sha224(script_content.encode("utf-8")).hexdigest()
         execution_time = 0
-        status = "Success"
 
         # Execute the contents of the script
         if len(script_content) > 0:
@@ -491,6 +491,8 @@ class SnowflakeSession:
                 self.execute_snowflake_query(query=script_content, logger=logger)
             except snowflake.connector.errors.ProgrammingError as e:
                 # SQL syntax/logic errors
+                end = time.time()
+                execution_time = round(end - start)
                 logger.error(
                     "SQL execution failed",
                     script_name=script.name,
@@ -499,6 +501,15 @@ class SnowflakeSession:
                     sql_error_code=getattr(e, "errno", None),
                     sql_state=getattr(e, "sqlstate", None),
                     error_message=str(e),
+                )
+
+                # Record the failed execution in change history
+                self.record_change_history(
+                    script=script,
+                    checksum=checksum,
+                    execution_time=execution_time,
+                    status="Failed",
+                    logger=logger,
                 )
 
                 raise ScriptExecutionError(
@@ -514,12 +525,23 @@ class SnowflakeSession:
 
             except snowflake.connector.errors.DatabaseError as e:
                 # Connection, permission, warehouse errors
+                end = time.time()
+                execution_time = round(end - start)
                 logger.error(
                     "Database error during script execution",
                     script_name=script.name,
                     script_path=script.file_path.as_posix(),
                     script_type=script.type,
                     error_message=str(e),
+                )
+
+                # Record the failed execution in change history
+                self.record_change_history(
+                    script=script,
+                    checksum=checksum,
+                    execution_time=execution_time,
+                    status="Failed",
+                    logger=logger,
                 )
 
                 raise ScriptExecutionError(
@@ -532,6 +554,8 @@ class SnowflakeSession:
 
             except Exception as e:
                 # Unexpected errors
+                end = time.time()
+                execution_time = round(end - start)
                 logger.error(
                     "Unexpected error during script execution",
                     script_name=script.name,
@@ -539,6 +563,15 @@ class SnowflakeSession:
                     script_type=script.type,
                     error_message=str(e),
                     error_type=type(e).__name__,
+                )
+
+                # Record the failed execution in change history
+                self.record_change_history(
+                    script=script,
+                    checksum=checksum,
+                    execution_time=execution_time,
+                    status="Failed",
+                    logger=logger,
                 )
 
                 raise ScriptExecutionError(
@@ -553,12 +586,12 @@ class SnowflakeSession:
             end = time.time()
             execution_time = round(end - start)
 
-        # Record the script execution in change history
+        # Record the successful script execution in change history
         self.record_change_history(
             script=script,
             checksum=checksum,
             execution_time=execution_time,
-            status=status,
+            status="Success",
             logger=logger,
         )
 

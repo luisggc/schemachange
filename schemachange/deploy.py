@@ -6,6 +6,7 @@ import re
 import structlog
 
 from schemachange.cli_script_executor import execute_cli_script
+from schemachange.CLIScriptExecutionError import CLIScriptExecutionError
 from schemachange.config.DeployConfig import DeployConfig
 from schemachange.JinjaTemplateProcessor import JinjaTemplateProcessor
 from schemachange.session.Script import get_all_scripts_recursively
@@ -139,23 +140,35 @@ def deploy(config: DeployConfig, session: SnowflakeSession):
         # Execute the script based on its format (SQL or CLI)
         if script.format == "CLI":
             # Execute CLI script via subprocess
-            execution_time = execute_cli_script(
-                script=script,
-                content=content,
-                root_folder=config.root_folder,
-                dry_run=config.dry_run,
-                log=script_log,
-            )
-
-            # Record in change history (unless dry run)
-            if not config.dry_run:
-                session.record_change_history(
+            try:
+                execution_time = execute_cli_script(
                     script=script,
-                    checksum=checksum_current,
-                    execution_time=execution_time,
-                    status="Success",
-                    logger=script_log,
+                    content=content,
+                    root_folder=config.root_folder,
+                    dry_run=config.dry_run,
+                    log=script_log,
                 )
+
+                # Record successful execution in change history (unless dry run)
+                if not config.dry_run:
+                    session.record_change_history(
+                        script=script,
+                        checksum=checksum_current,
+                        execution_time=execution_time,
+                        status="Success",
+                        logger=script_log,
+                    )
+            except CLIScriptExecutionError as e:
+                # Record failed execution in change history (unless dry run)
+                if not config.dry_run:
+                    session.record_change_history(
+                        script=script,
+                        checksum=checksum_current,
+                        execution_time=getattr(e, "execution_time", 0),
+                        status="Failed",
+                        logger=script_log,
+                    )
+                raise  # Re-raise the exception after recording
         else:
             # Execute SQL script via Snowflake session
             session.apply_change_script(
