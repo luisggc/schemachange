@@ -110,6 +110,7 @@ snow sql -q "SELECT * FROM metadata.schemachange.change_history ORDER BY install
     1. [Versioned Script Naming](#versioned-script-naming)
     1. [Repeatable Script Naming](#repeatable-script-naming)
     1. [Always Script Naming](#always-script-naming)
+    1. [CLI Migration Scripts](#cli-migration-scripts)
     1. [Script Requirements](#script-requirements)
     1. [Using Variables in Scripts](#using-variables-in-scripts)
         1. [Secrets filtering](#secrets-filtering)
@@ -159,12 +160,14 @@ schemachange expects a directory structure like the following to exist:
 |-- folder_1
     |-- V1.1.1__first_change.sql
     |-- V1.1.2__second_change.sql
+    |-- V1.1.3__deploy_dbt_project.cli.yml
     |-- R__sp_add_sales.sql
     |-- R__fn_get_timezone.sql
 |-- folder_2
     |-- folder_3
-        |-- V1.1.3__third_change.sql
+        |-- V1.1.4__third_change.sql
         |-- R__fn_sort_ascii.sql
+        |-- A__run_cleanup.cli.yml
 ```
 
 The schemachange folder structure is very flexible. The `project_root` folder is specified with the `-f`,
@@ -241,6 +244,83 @@ e.g.
 * A__assign_roles.sql
 
 This type of change script is useful for an environment set up after cloning. Always scripts are applied always last.
+
+### CLI Migration Scripts
+
+CLI migration scripts allow you to execute command-line tools as part of your deployment process. This is useful for deploying complex objects in Snowflake that go beyond SQL (such as a dbt Project or Snowpark object) and would require the use of the Snowflake CLI.
+
+CLI migration scripts use a YAML format with the `.cli.yml` extension (or `.cli.yml.jinja` for Jinja templating). They follow the same naming conventions as SQL scripts:
+
+* `V1.0.0__deploy_dbt_project.cli.yml` - Versioned CLI script
+* `R__refresh_snowpark_function.cli.yml` - Repeatable CLI script
+* `A__cleanup.cli.yml` - Always CLI script
+
+#### YAML Schema
+
+CLI migration scripts define a list of steps to execute:
+
+```yaml
+steps:
+  - cli: snow
+    command: dbt
+    args:
+      - "deploy"
+      - "--connection"
+      - "myconnection"
+    working_dir: ./my_dbt_project
+    description: "Deploy the Snowflake dbt Project"
+
+  - cli: snow
+    command: snowpark
+    args:
+      - "deploy"
+      - "--connection"
+      - "myconnection"
+    working_dir: ./my_snowpark_function
+    description: "Deploy the Snowpark function"
+```
+
+#### Step Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `cli` | Yes | CLI tool to execute. Currently only `snow` (Snowflake CLI) is supported. |
+| `command` | Yes | The command to run (e.g., `app`, `sql`, `connection`). |
+| `args` | No | List of arguments to pass to the command. Each argument must be a separate list item. |
+| `working_dir` | No | Working directory for command execution. Resolved relative to root-folder. Defaults to root-folder. |
+| `env` | No | Environment variables to set for the command (key-value pairs). |
+| `description` | No | Human-readable description of what this step does. |
+
+#### Important Notes
+
+**Arguments must be separate list items:** When specifying `args`, each argument must be its own list item. For example:
+
+```yaml
+# Correct
+args:
+  - "--connection"
+  - "myconnection"
+
+# Incorrect - will not work
+args:
+  - "--connection myconnection"
+```
+
+**Supported CLI tools:** Currently only the Snowflake CLI (`snow`) is supported. The tool must be installed and available in your PATH.
+
+**Jinja templating:** CLI migration scripts support Jinja templating. Use the `.cli.yml.jinja` extension and reference variables the same way as in SQL scripts:
+
+```yaml
+steps:
+  - cli: snow
+    command: sql
+    args:
+      - "--query"
+      - "USE DATABASE {{ database_name }}"
+    description: "Switch to {{ environment }} database"
+```
+
+**Change history tracking:** CLI migration scripts are tracked in the change history table just like SQL scripts. The `SCRIPT` column will contain the full filename including the `.cli.yml` extension.
 
 ### Script Requirements
 
@@ -355,19 +435,19 @@ table. That must be created before running schemachange.
 
 The structure of the `CHANGE_HISTORY` table is as follows:
 
-| Column Name    | Type          | Example                       |
-|----------------|---------------|-------------------------------|
-| VERSION        | VARCHAR       | 1.1.1                         |
-| DESCRIPTION    | VARCHAR       | First change                  |
-| SCRIPT         | VARCHAR       | V1.1.1__first_change.sql      |
-| SCRIPT_TYPE    | VARCHAR       | V                             |
-| CHECKSUM       | VARCHAR       | 38e5ba03b1a6d2...             |
-| EXECUTION_TIME | NUMBER        | 4                             |
-| STATUS         | VARCHAR       | Success                       |
-| INSTALLED_BY   | VARCHAR       | SNOWFLAKE_USER                |
-| INSTALLED_ON   | TIMESTAMP_LTZ | 2020-03-17 12:54:33.056 -0700 |
+| Column Name    | Type          | Example                            |
+|----------------|---------------|------------------------------------|
+| VERSION        | VARCHAR       | 1.1.1                              |
+| DESCRIPTION    | VARCHAR       | First change                       |
+| SCRIPT         | VARCHAR       | V1.1.1__first_change.sql           |
+| SCRIPT_TYPE    | VARCHAR       | V                                  |
+| CHECKSUM       | VARCHAR       | 38e5ba03b1a6d2...                  |
+| EXECUTION_TIME | NUMBER        | 4                                  |
+| STATUS         | VARCHAR       | Success                            |
+| INSTALLED_BY   | VARCHAR       | SNOWFLAKE_USER                     |
+| INSTALLED_ON   | TIMESTAMP_LTZ | 2020-03-17 12:54:33.056 -0700      |
 
-A new row will be added to this table every time a change script has been applied to the database. schemachange will use
+A new row will be added to this table every time a change script has been applied to the database. Both SQL scripts (`.sql`) and CLI migration scripts (`.cli.yml`) are tracked in this table. schemachange will use
 this table to identify which changes have been applied to the database and will not apply the same version more than
 once.
 
