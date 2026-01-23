@@ -26,6 +26,15 @@ class Script(ABC):
     file_path: Path
     description: str
 
+    @property
+    def type_desc(self) -> str:
+        """Return a descriptive string for the script type, including version for V scripts and format."""
+        parts = [self.type]
+        if self.type == "V" and hasattr(self, "version"):
+            parts.append(f"({self.version})")
+        parts.append(self.format)
+        return " ".join(parts)
+
     @staticmethod
     def get_script_name(file_path: Path) -> str:
         """Script name is the filename without any jinja extension"""

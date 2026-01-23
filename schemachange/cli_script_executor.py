@@ -357,9 +357,9 @@ def execute_cli_script(
     )
 
     if out_of_order:
-        script_log.info("Applying CLI change script (out-of-order)")
+        script_log.info(f"Applying {script.type_desc} change script (out-of-order)")
     else:
-        script_log.info("Applying CLI change script")
+        script_log.info(f"Applying {script.type_desc} change script")
 
     # Parse the YAML content
     try:

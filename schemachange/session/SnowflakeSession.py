@@ -478,10 +478,11 @@ class SnowflakeSession:
         if dry_run:
             logger.info("Running in dry-run mode. Skipping execution")
             return
+
         if out_of_order:
-            logger.info("Applying change script (out-of-order)")
+            logger.info(f"Applying {script.type_desc} change script (out-of-order)")
         else:
-            logger.info("Applying change script")
+            logger.info(f"Applying {script.type_desc} change script")
         # Define a few other change related variables
         # noinspection PyTypeChecker
         checksum = hashlib.sha224(script_content.encode("utf-8")).hexdigest()
