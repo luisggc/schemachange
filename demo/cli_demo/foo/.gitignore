@@ -1,0 +1,5 @@
+.packages/
+.venv/
+requirements.snowflake.txt
+app.zip
+__pycache__

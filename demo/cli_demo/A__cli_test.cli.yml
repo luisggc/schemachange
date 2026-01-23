@@ -3,12 +3,3 @@ steps:
     command: init
     working_dir: .
     description: "Test CLI"
-  - cli: snow
-    command: sql
-    args:
-      - "--connection"
-      - "defaultold"
-      - "--query"
-      - "SELECT 1"
-    working_dir: .
-    description: "Test CLI Query"

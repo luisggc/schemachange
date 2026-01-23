@@ -1,7 +1,16 @@
 steps:
   - cli: snow
-    command: sql
+    command: snowpark build
     args:
-      - "--help"
-    working_dir: .
-    description: "Test CLI"
+      - "--connection"
+      - "defaultold"
+    working_dir: ./foo
+    description: "Test Snowpark Build"
+  - cli: snow
+    command: snowpark deploy
+    args:
+      - "--replace"
+      - "--connection"
+      - "defaultold"
+    working_dir: ./foo
+    description: "Test Snowpark Deploy"
