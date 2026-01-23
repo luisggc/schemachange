@@ -331,6 +331,7 @@ def execute_cli_script(
     root_folder: Path,
     dry_run: bool,
     log: structlog.BoundLogger,
+    out_of_order: bool = False,
 ) -> int:
     """
     Execute a CLI migration script.
@@ -341,6 +342,7 @@ def execute_cli_script(
         root_folder: Root folder for resolving relative paths
         dry_run: If True, log commands without executing
         log: Logger instance
+        out_of_order: If True, indicates this versioned script is being applied out of order
 
     Returns:
         Total execution time in seconds
@@ -354,7 +356,10 @@ def execute_cli_script(
         script_format="CLI",
     )
 
-    script_log.info("Applying CLI change script")
+    if out_of_order:
+        script_log.info("Applying CLI change script (out-of-order)")
+    else:
+        script_log.info("Applying CLI change script")
 
     # Parse the YAML content
     try:

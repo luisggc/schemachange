@@ -118,6 +118,14 @@ def deploy(config: DeployConfig, session: SnowflakeSession):
                 scripts_skipped += 1
                 continue
 
+        # Determine if this is an out-of-order execution (versioned script with version <= max)
+        is_out_of_order = (
+            script.type == "V"
+            and config.out_of_order
+            and max_published_version is not None
+            and get_alphanum_key(script.version) <= max_published_version
+        )
+
         # Execute the script based on its format (SQL or CLI)
         if script.format == "CLI":
             # Execute CLI script via subprocess
@@ -128,6 +136,7 @@ def deploy(config: DeployConfig, session: SnowflakeSession):
                     root_folder=config.root_folder,
                     dry_run=config.dry_run,
                     log=script_log,
+                    out_of_order=is_out_of_order,
                 )
 
                 # Record successful execution in change history (unless dry run)
@@ -151,14 +160,6 @@ def deploy(config: DeployConfig, session: SnowflakeSession):
                     )
                 raise  # Re-raise the exception after recording
         else:
-            # Determine if this is an out-of-order execution (versioned script with version <= max)
-            is_out_of_order = (
-                script.type == "V"
-                and config.out_of_order
-                and max_published_version is not None
-                and get_alphanum_key(script.version) <= max_published_version
-            )
-
             # Execute SQL script via Snowflake session
             session.apply_change_script(
                 script=script,
