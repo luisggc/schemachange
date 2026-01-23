@@ -372,6 +372,19 @@ def parse_cli_args(args) -> dict:
         "(Deprecated alias: --raise-exception-on-ignored-versioned-script)",
         required=False,
     )
+    parser_deploy.add_argument(
+        "--out-of-order",
+        action="store_const",
+        const=True,
+        default=None,
+        dest="out_of_order",
+        help="Allow versioned scripts to be applied out of order. When enabled, scripts are only skipped "
+        "if they have already been applied, regardless of whether their version is older than the max "
+        "published version. Useful for parallel development with timestamp-based versioning "
+        "(the default is False). "
+        "Can also be set via SCHEMACHANGE_OUT_OF_ORDER environment variable.",
+        required=False,
+    )
 
     parser_render = subcommands.add_parser(
         "render",

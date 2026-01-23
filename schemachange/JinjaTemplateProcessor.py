@@ -70,7 +70,6 @@ class JinjaTemplateProcessor:
                     f"CLI script '{script}' rendered to empty content after Jinja processing.\n"
                     f"Ensure the file contains valid YAML with a 'steps' key."
                 )
-            logger.debug("Rendered CLI script", script=script, content_length=len(content))
             return content
 
         # SQL-specific processing below

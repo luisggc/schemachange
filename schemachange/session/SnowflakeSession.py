@@ -19,6 +19,7 @@ from schemachange.session.Script import (
     VersionedCLIScript,
     VersionedScript,
 )
+from schemachange.version import max_alphanumeric
 
 
 class SnowflakeSession:
@@ -417,13 +418,9 @@ class SnowflakeSession:
             AND STATUS = 'Success'
         ORDER BY INSTALLED_ON DESC
         """
-        # Order by INSTALLED_ON (not VERSION) because version numbers are user-configured
-        # and may not sort consistently across deployments (e.g., semantic versioning, custom
-        # schemes, branch-based versions). INSTALLED_ON is universally sortable and provides
-        # reliable chronological order. The first result (versions[0]) becomes max_published_version.
         results = self.execute_snowflake_query(dedent(query), logger=self.logger)
 
-        # Collect all the results into a list
+        # Collect all the results into a dict and track versions
         versioned_scripts: dict[str, dict[str, str | int]] = defaultdict(dict)
         versions: list[str | int | None] = []
         for cursor in results:
@@ -435,8 +432,12 @@ class SnowflakeSession:
                     "checksum": checksum,
                 }
 
-        # noinspection PyTypeChecker
-        return versioned_scripts, versions[0] if versions else None
+        # Find the maximum version using alphanumeric comparison
+        # This correctly handles semantic versioning (1.0.10 > 1.0.2), timestamps, etc.
+        # and works correctly with out-of-order script execution
+        max_version = max_alphanumeric(versions)
+
+        return versioned_scripts, max_version
 
     def reset_session(self, logger: structlog.BoundLogger):
         # These items are optional, so we can only reset the ones with values
@@ -470,13 +471,17 @@ class SnowflakeSession:
         script_content: str,
         dry_run: bool,
         logger: structlog.BoundLogger,
+        out_of_order: bool = False,
     ) -> None:
         if self.change_history_table is None:
             raise ValueError("change_history_table is required for deployment operations")
         if dry_run:
             logger.info("Running in dry-run mode. Skipping execution")
             return
-        logger.info("Applying change script")
+        if out_of_order:
+            logger.info("Applying change script (out-of-order)")
+        else:
+            logger.info("Applying change script")
         # Define a few other change related variables
         # noinspection PyTypeChecker
         checksum = hashlib.sha224(script_content.encode("utf-8")).hexdigest()

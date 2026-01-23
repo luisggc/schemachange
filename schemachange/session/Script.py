@@ -35,7 +35,7 @@ class Script(ABC):
 
     @classmethod
     def from_path(cls, file_path: Path, **kwargs) -> T:
-        logger.debug("script found", class_name=cls.__name__, file_path=file_path.as_posix())
+        logger.debug("Script found", class_name=cls.__name__, file_path=file_path.as_posix())
 
         # script name is the filename without any jinja extension
         script_name = cls.get_script_name(file_path=file_path)
