@@ -11,7 +11,15 @@ import structlog
 from schemachange.config.ChangeHistoryTable import ChangeHistoryTable
 from schemachange.config.utils import get_snowflake_identifier_string
 from schemachange.ScriptExecutionError import ScriptExecutionError
-from schemachange.session.Script import AlwaysScript, RepeatableScript, VersionedScript
+from schemachange.session.Script import (
+    AlwaysCLIScript,
+    AlwaysScript,
+    RepeatableCLIScript,
+    RepeatableScript,
+    VersionedCLIScript,
+    VersionedScript,
+)
+from schemachange.version import max_alphanumeric
 
 
 class SnowflakeSession:
@@ -407,15 +415,12 @@ class SnowflakeSession:
         SELECT VERSION, SCRIPT, CHECKSUM
         FROM {self.change_history_table.fully_qualified}
         WHERE SCRIPT_TYPE = 'V'
+            AND STATUS = 'Success'
         ORDER BY INSTALLED_ON DESC
         """
-        # Order by INSTALLED_ON (not VERSION) because version numbers are user-configured
-        # and may not sort consistently across deployments (e.g., semantic versioning, custom
-        # schemes, branch-based versions). INSTALLED_ON is universally sortable and provides
-        # reliable chronological order. The first result (versions[0]) becomes max_published_version.
         results = self.execute_snowflake_query(dedent(query), logger=self.logger)
 
-        # Collect all the results into a list
+        # Collect all the results into a dict and track versions
         versioned_scripts: dict[str, dict[str, str | int]] = defaultdict(dict)
         versions: list[str | int | None] = []
         for cursor in results:
@@ -427,8 +432,12 @@ class SnowflakeSession:
                     "checksum": checksum,
                 }
 
-        # noinspection PyTypeChecker
-        return versioned_scripts, versions[0] if versions else None
+        # Find the maximum version using alphanumeric comparison
+        # This correctly handles semantic versioning (1.0.10 > 1.0.2), timestamps, etc.
+        # and works correctly with out-of-order script execution
+        max_version = max_alphanumeric(versions)
+
+        return versioned_scripts, max_version
 
     def reset_session(self, logger: structlog.BoundLogger):
         # These items are optional, so we can only reset the ones with values
@@ -453,22 +462,31 @@ class SnowflakeSession:
 
     def apply_change_script(
         self,
-        script: VersionedScript | RepeatableScript | AlwaysScript,
+        script: VersionedScript
+        | RepeatableScript
+        | AlwaysScript
+        | VersionedCLIScript
+        | RepeatableCLIScript
+        | AlwaysCLIScript,
         script_content: str,
         dry_run: bool,
         logger: structlog.BoundLogger,
+        out_of_order: bool = False,
     ) -> None:
         if self.change_history_table is None:
             raise ValueError("change_history_table is required for deployment operations")
         if dry_run:
             logger.info("Running in dry-run mode. Skipping execution")
             return
-        logger.info("Applying change script")
+
+        if out_of_order:
+            logger.info(f"Applying {script.type_desc} change script (out-of-order)")
+        else:
+            logger.info(f"Applying {script.type_desc} change script")
         # Define a few other change related variables
         # noinspection PyTypeChecker
         checksum = hashlib.sha224(script_content.encode("utf-8")).hexdigest()
         execution_time = 0
-        status = "Success"
 
         # Execute the contents of the script
         if len(script_content) > 0:
@@ -479,6 +497,8 @@ class SnowflakeSession:
                 self.execute_snowflake_query(query=script_content, logger=logger)
             except snowflake.connector.errors.ProgrammingError as e:
                 # SQL syntax/logic errors
+                end = time.time()
+                execution_time = round(end - start)
                 logger.error(
                     "SQL execution failed",
                     script_name=script.name,
@@ -487,6 +507,15 @@ class SnowflakeSession:
                     sql_error_code=getattr(e, "errno", None),
                     sql_state=getattr(e, "sqlstate", None),
                     error_message=str(e),
+                )
+
+                # Record the failed execution in change history
+                self.record_change_history(
+                    script=script,
+                    checksum=checksum,
+                    execution_time=execution_time,
+                    status="Failed",
+                    logger=logger,
                 )
 
                 raise ScriptExecutionError(
@@ -502,12 +531,23 @@ class SnowflakeSession:
 
             except snowflake.connector.errors.DatabaseError as e:
                 # Connection, permission, warehouse errors
+                end = time.time()
+                execution_time = round(end - start)
                 logger.error(
                     "Database error during script execution",
                     script_name=script.name,
                     script_path=script.file_path.as_posix(),
                     script_type=script.type,
                     error_message=str(e),
+                )
+
+                # Record the failed execution in change history
+                self.record_change_history(
+                    script=script,
+                    checksum=checksum,
+                    execution_time=execution_time,
+                    status="Failed",
+                    logger=logger,
                 )
 
                 raise ScriptExecutionError(
@@ -520,6 +560,8 @@ class SnowflakeSession:
 
             except Exception as e:
                 # Unexpected errors
+                end = time.time()
+                execution_time = round(end - start)
                 logger.error(
                     "Unexpected error during script execution",
                     script_name=script.name,
@@ -527,6 +569,15 @@ class SnowflakeSession:
                     script_type=script.type,
                     error_message=str(e),
                     error_type=type(e).__name__,
+                )
+
+                # Record the failed execution in change history
+                self.record_change_history(
+                    script=script,
+                    checksum=checksum,
+                    execution_time=execution_time,
+                    status="Failed",
+                    logger=logger,
                 )
 
                 raise ScriptExecutionError(
@@ -541,7 +592,44 @@ class SnowflakeSession:
             end = time.time()
             execution_time = round(end - start)
 
-        # Compose and execute the insert statement to the log file
+        # Record the successful script execution in change history
+        self.record_change_history(
+            script=script,
+            checksum=checksum,
+            execution_time=execution_time,
+            status="Success",
+            logger=logger,
+        )
+
+    def record_change_history(
+        self,
+        script: VersionedScript
+        | RepeatableScript
+        | AlwaysScript
+        | VersionedCLIScript
+        | RepeatableCLIScript
+        | AlwaysCLIScript,
+        checksum: str,
+        execution_time: int,
+        status: str,
+        logger: structlog.BoundLogger,
+    ) -> None:
+        """
+        Record a script execution in the change history table.
+
+        This method is used by both SQL scripts (via apply_change_script) and
+        CLI scripts (called directly from deploy.py after CLI execution).
+
+        Args:
+            script: The script that was executed
+            checksum: SHA-224 checksum of the rendered script content
+            execution_time: Execution time in seconds
+            status: Execution status (e.g., "Success")
+            logger: Logger instance for this operation
+        """
+        if self.change_history_table is None:
+            raise ValueError("change_history_table is required for deployment operations")
+
         query = f"""\
             INSERT INTO {self.change_history_table.fully_qualified} (
                 VERSION,

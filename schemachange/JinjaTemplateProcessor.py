@@ -42,6 +42,11 @@ class JinjaTemplateProcessor:
         # to make unit testing easier
         self.__environment = jinja2.Environment(loader=loader, **self._env_args)
 
+    def _is_cli_script(self, script: str | Path) -> bool:
+        """Check if the script is a CLI migration file (.cli.yml)."""
+        script_lower = str(script).lower()
+        return script_lower.endswith(".cli.yml") or script_lower.endswith(".cli.yml.jinja")
+
     def render(self, script: str, variables: dict[str, Any] | None) -> str:
         if not variables:
             variables = {}
@@ -51,12 +56,23 @@ class JinjaTemplateProcessor:
         raw_content = template.render(**variables)
 
         # Remove UTF-8 BOM if present (issue #250)
-        # The BOM character (\ufeff) causes Snowflake SQL compilation errors
+        # The BOM character (\ufeff) causes errors
         # Common in files saved with "UTF-8 with BOM" encoding (Windows/VS Code)
         if raw_content.startswith("\ufeff"):
             logger.debug("Removing UTF-8 BOM from script", script=script)
             raw_content = raw_content[1:]
 
+        # For CLI scripts (.cli.yml), return the rendered YAML without SQL-specific processing
+        if self._is_cli_script(script):
+            content = raw_content.strip()
+            if not content:
+                raise ValueError(
+                    f"CLI script '{script}' rendered to empty content after Jinja processing.\n"
+                    f"Ensure the file contains valid YAML with a 'steps' key."
+                )
+            return content
+
+        # SQL-specific processing below
         content = raw_content.strip()
         content = content[:-1] if content.endswith(";") else content
 

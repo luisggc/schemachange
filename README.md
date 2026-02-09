@@ -110,6 +110,7 @@ snow sql -q "SELECT * FROM metadata.schemachange.change_history ORDER BY install
     1. [Versioned Script Naming](#versioned-script-naming)
     1. [Repeatable Script Naming](#repeatable-script-naming)
     1. [Always Script Naming](#always-script-naming)
+    1. [CLI Migration Scripts](#cli-migration-scripts)
     1. [Script Requirements](#script-requirements)
     1. [Using Variables in Scripts](#using-variables-in-scripts)
         1. [Secrets filtering](#secrets-filtering)
@@ -130,6 +131,8 @@ snow sql -q "SELECT * FROM metadata.schemachange.change_history ORDER BY install
     1. [Configuration Priority](#configuration-priority)
     1. [Account Identifier Format](#account-identifier-format)
     1. [Required Snowflake Privileges](#required-snowflake-privileges)
+1. [Deployment Scenarios](#deployment-scenarios)
+    1. [Out Of Order](#out-of-order)
 1. [Upgrading to 4.1.0](#upgrading-to-410)
 1. [Commands](#commands)
     1. [deploy](#deploy)
@@ -159,12 +162,14 @@ schemachange expects a directory structure like the following to exist:
 |-- folder_1
     |-- V1.1.1__first_change.sql
     |-- V1.1.2__second_change.sql
+    |-- V1.1.3__deploy_dbt_project.cli.yml
     |-- R__sp_add_sales.sql
     |-- R__fn_get_timezone.sql
 |-- folder_2
     |-- folder_3
-        |-- V1.1.3__third_change.sql
+        |-- V1.1.4__third_change.sql
         |-- R__fn_sort_ascii.sql
+        |-- A__run_cleanup.cli.yml
 ```
 
 The schemachange folder structure is very flexible. The `project_root` folder is specified with the `-f`,
@@ -241,6 +246,83 @@ e.g.
 * A__assign_roles.sql
 
 This type of change script is useful for an environment set up after cloning. Always scripts are applied always last.
+
+### CLI Migration Scripts
+
+CLI migration scripts allow you to execute command-line tools as part of your deployment process. This is useful for deploying complex objects in Snowflake that go beyond SQL (such as a dbt Project or Snowpark object) and would require the use of the Snowflake CLI.
+
+CLI migration scripts use a YAML format with the `.cli.yml` extension (or `.cli.yml.jinja` for Jinja templating). They follow the same naming conventions as SQL scripts:
+
+* `V1.0.0__deploy_dbt_project.cli.yml` - Versioned CLI script
+* `R__refresh_snowpark_function.cli.yml` - Repeatable CLI script
+* `A__cleanup.cli.yml` - Always CLI script
+
+#### YAML Schema
+
+CLI migration scripts define a list of steps to execute:
+
+```yaml
+steps:
+  - cli: snow
+    command: dbt
+    args:
+      - "deploy"
+      - "--connection"
+      - "myconnection"
+    working_dir: ./my_dbt_project
+    description: "Deploy the Snowflake dbt Project"
+
+  - cli: snow
+    command: snowpark
+    args:
+      - "deploy"
+      - "--connection"
+      - "myconnection"
+    working_dir: ./my_snowpark_function
+    description: "Deploy the Snowpark function"
+```
+
+#### Step Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `cli` | Yes | CLI tool to execute. Currently only `snow` (Snowflake CLI) is supported. |
+| `command` | Yes | The command to run (e.g., `app`, `sql`, `connection`). |
+| `args` | No | List of arguments to pass to the command. Each argument must be a separate list item. |
+| `working_dir` | No | Working directory for command execution. Resolved relative to root-folder. Defaults to root-folder. |
+| `env` | No | Environment variables to set for the command (key-value pairs). |
+| `description` | No | Human-readable description of what this step does. |
+
+#### Important Notes
+
+**Arguments must be separate list items:** When specifying `args`, each argument must be its own list item. For example:
+
+```yaml
+# Correct
+args:
+  - "--connection"
+  - "myconnection"
+
+# Incorrect - will not work
+args:
+  - "--connection myconnection"
+```
+
+**Supported CLI tools:** Currently only the Snowflake CLI (`snow`) is supported. The tool must be installed and available in your PATH.
+
+**Jinja templating:** CLI migration scripts support Jinja templating. Use the `.cli.yml.jinja` extension and reference variables the same way as in SQL scripts:
+
+```yaml
+steps:
+  - cli: snow
+    command: sql
+    args:
+      - "--query"
+      - "USE DATABASE {{ database_name }}"
+    description: "Switch to {{ environment }} database"
+```
+
+**Change history tracking:** CLI migration scripts are tracked in the change history table just like SQL scripts. The `SCRIPT` column will contain the full filename including the `.cli.yml` extension.
 
 ### Script Requirements
 
@@ -355,19 +437,19 @@ table. That must be created before running schemachange.
 
 The structure of the `CHANGE_HISTORY` table is as follows:
 
-| Column Name    | Type          | Example                       |
-|----------------|---------------|-------------------------------|
-| VERSION        | VARCHAR       | 1.1.1                         |
-| DESCRIPTION    | VARCHAR       | First change                  |
-| SCRIPT         | VARCHAR       | V1.1.1__first_change.sql      |
-| SCRIPT_TYPE    | VARCHAR       | V                             |
-| CHECKSUM       | VARCHAR       | 38e5ba03b1a6d2...             |
-| EXECUTION_TIME | NUMBER        | 4                             |
-| STATUS         | VARCHAR       | Success                       |
-| INSTALLED_BY   | VARCHAR       | SNOWFLAKE_USER                |
-| INSTALLED_ON   | TIMESTAMP_LTZ | 2020-03-17 12:54:33.056 -0700 |
+| Column Name    | Type          | Example                            |
+|----------------|---------------|------------------------------------|
+| VERSION        | VARCHAR       | 1.1.1                              |
+| DESCRIPTION    | VARCHAR       | First change                       |
+| SCRIPT         | VARCHAR       | V1.1.1__first_change.sql           |
+| SCRIPT_TYPE    | VARCHAR       | V                                  |
+| CHECKSUM       | VARCHAR       | 38e5ba03b1a6d2...                  |
+| EXECUTION_TIME | NUMBER        | 4                                  |
+| STATUS         | VARCHAR       | Success                            |
+| INSTALLED_BY   | VARCHAR       | SNOWFLAKE_USER                     |
+| INSTALLED_ON   | TIMESTAMP_LTZ | 2020-03-17 12:54:33.056 -0700      |
 
-A new row will be added to this table every time a change script has been applied to the database. schemachange will use
+A new row will be added to this table every time a change script has been applied to the database. Both SQL scripts (`.sql`) and CLI migration scripts (`.cli.yml`) are tracked in this table. schemachange will use
 this table to identify which changes have been applied to the database and will not apply the same version more than
 once.
 
@@ -744,6 +826,9 @@ schemachange:
   # Raise exception when versioned scripts are ignored (default: false)
   raise-exception-on-ignored-versioned-script: false
 
+  # Allow out-of-order versioned script execution for parallel development (default: false)
+  out-of-order: false
+
 snowflake:
   # Snowflake connection parameters (these can also come from connections.toml or environment variables)
   account: 'myaccount.us-east-1.aws'
@@ -813,6 +898,9 @@ dry-run: false
 
 # A string to include in the QUERY_TAG that is attached to every SQL statement executed
 query-tag: 'QUERY_TAG'
+
+# Allow out-of-order versioned script execution for parallel development (the default is False)
+out-of-order: false
 ```
 
 **Note:** If `config-version` is not specified, schemachange assumes version 1 for backward compatibility.
@@ -934,6 +1022,7 @@ These environment variables configure schemachange-specific behavior:
 | `SCHEMACHANGE_CREATE_CHANGE_HISTORY_TABLE` | Create change history table if it doesn't exist | `true` or `false` | boolean |
 | `SCHEMACHANGE_AUTOCOMMIT` | Enable autocommit for DML commands | `true` or `false` | boolean |
 | `SCHEMACHANGE_DRY_RUN` | Run in dry run mode | `true` or `false` | boolean |
+| `SCHEMACHANGE_OUT_OF_ORDER` | Allow out-of-order versioned script execution | `true` or `false` | boolean |
 | `SCHEMACHANGE_QUERY_TAG` | String to include in QUERY_TAG for SQL statements | `my-project` | string |
 | `SCHEMACHANGE_LOG_LEVEL` | Logging level | `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL` | string |
 | `SCHEMACHANGE_CONNECTIONS_FILE_PATH` | Path to connections.toml file (controls where schemachange looks for connection config) | `~/.snowflake/connections.toml` | string |
@@ -1161,6 +1250,77 @@ For more information about Snowflake access control:
 - [Snowflake Access Control Overview](https://docs.snowflake.com/en/user-guide/security-access-control-overview)
 - [GRANT Command Reference](https://docs.snowflake.com/en/sql-reference/sql/grant-privilege)
 
+## Deployment Scenarios
+
+This section covers common deployment patterns and how to configure schemachange for different workflows.
+
+### Out Of Order
+
+When multiple development teams work on feature branches simultaneously, they often create versioned migrations that don't merge in chronological order. This can cause issues with schemachange's default behavior.
+
+#### The Problem
+
+Consider this scenario:
+1. Team A creates `V1.0.1__feature_a.sql` on branch-a
+2. Team B creates `V1.0.2__feature_b.sql` on branch-b
+3. Branch B merges first → `V1.0.2` is applied (max version = 1.0.2)
+4. Branch A merges later → `V1.0.1` is **skipped** because 1.0.1 ≤ 1.0.2
+
+By default, schemachange skips any versioned script with a version number less than or equal to the maximum version already applied. This protects against accidentally re-running old migrations, but it can cause legitimate migrations to be missed in parallel development scenarios.
+
+#### The Solution: Out-of-Order Execution
+
+Enable the `--out-of-order` option to allow versioned scripts to be applied regardless of whether their version number is older than the maximum applied version:
+
+```bash
+schemachange deploy --out-of-order
+```
+
+| Scenario | Default Behavior | With `--out-of-order` |
+|----------|------------------|----------------------|
+| Script version > max applied | ✅ Apply | ✅ Apply |
+| Script version ≤ max applied, already run | ⏭️ Skip | ⏭️ Skip |
+| Script version ≤ max applied, never run | ⏭️ Skip | ✅ **Apply** |
+
+#### Configuration
+
+**CLI:**
+```bash
+schemachange deploy --out-of-order
+```
+
+**Environment Variable:**
+```bash
+export SCHEMACHANGE_OUT_OF_ORDER=true
+```
+
+**YAML Config:**
+```yaml
+out-of-order: true
+```
+
+#### Best Practices for Parallel Development
+
+1. **Use timestamp-based versioning** to minimize version collisions:
+   ```
+   V20260122143052__add_customers_table.sql
+   V20260122154512__add_orders_table.sql
+   ```
+   Timestamps are virtually unique across developers and branches.
+
+2. **Enable out-of-order in your CI/CD pipeline** when deploying to shared environments where multiple branches may merge in any order.
+
+3. **Keep migrations independent** when possible. Out-of-order execution means migrations may run in a different order than their version numbers suggest.
+
+4. **Review the change history table** to understand which migrations have been applied and in what order.
+
+#### Interaction with Other Options
+
+| Option | Behavior with `--out-of-order` |
+|--------|-------------------------------|
+| `--raise-exception-on-ignored-versioned-script` | Irrelevant—scripts are applied instead of ignored |
+| `--dry-run` | Shows which out-of-order scripts would be applied |
+
 ## Upgrading to 4.1.0
 
 ### New Authentication CLI Arguments (with Security Design Decision)
@@ -1238,7 +1398,7 @@ compatibility with versions prior to 3.2.
 
 This is the main command that runs the deployment process.
 
-**Usage:** `schemachange deploy [-h] [--config-folder CONFIG_FOLDER] [--config-file-name CONFIG_FILE_NAME] [-f ROOT_FOLDER] [-m MODULES_FOLDER] [-c CHANGE_HISTORY_TABLE] [-V VARS] [--create-change-history-table] [-ac] [--dry-run] [-Q QUERY_TAG] [-L LOG_LEVEL] [-C CONNECTION_NAME] [--connections-file-path CONNECTIONS_FILE_PATH] [-a ACCOUNT] [-u USER] [-r ROLE] [-w WAREHOUSE] [-d DATABASE] [-s SCHEMA] [--snowflake-authenticator AUTHENTICATOR] [--snowflake-private-key-path PATH] [--snowflake-token-file-path PATH]`
+**Usage:** `schemachange deploy [-h] [--config-folder CONFIG_FOLDER] [--config-file-name CONFIG_FILE_NAME] [-f ROOT_FOLDER] [-m MODULES_FOLDER] [-c CHANGE_HISTORY_TABLE] [-V VARS] [--create-change-history-table] [-ac] [--dry-run] [--out-of-order] [-Q QUERY_TAG] [-L LOG_LEVEL] [-C CONNECTION_NAME] [--connections-file-path CONNECTIONS_FILE_PATH] [-a ACCOUNT] [-u USER] [-r ROLE] [-w WAREHOUSE] [-d DATABASE] [-s SCHEMA] [--snowflake-authenticator AUTHENTICATOR] [--snowflake-private-key-path PATH] [--snowflake-token-file-path PATH]`
 
 #### Command-Line Arguments
 
@@ -1267,6 +1427,7 @@ Most arguments also support short forms (single dash, single letter) for conveni
 | `--schemachange-create-change-history-table`<br/>`--create-change-history-table` *(deprecated)* | `SCHEMACHANGE_CREATE_CHANGE_HISTORY_TABLE` | Create the change history table if it doesn't exist (default: false) |
 | `-ac`<br/>`--schemachange-autocommit`<br/>`--autocommit` *(deprecated)* | `SCHEMACHANGE_AUTOCOMMIT` | Enable autocommit for DML commands (default: false) |
 | `--schemachange-dry-run`<br/>`--dry-run` *(deprecated)* | `SCHEMACHANGE_DRY_RUN` | Run in dry run mode (default: false) |
+| `--out-of-order` | `SCHEMACHANGE_OUT_OF_ORDER` | Allow out-of-order versioned script execution for parallel development (default: false) |
 | `-Q`<br/>`--schemachange-query-tag`<br/>`--query-tag` *(deprecated)* | `SCHEMACHANGE_QUERY_TAG` | String to include in `QUERY_TAG` attached to every SQL statement |
 | `-L`<br/>`--schemachange-log-level`<br/>`--log-level` *(deprecated)* | `SCHEMACHANGE_LOG_LEVEL` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL` (default: `INFO`) |
 | `-C`<br/>`--schemachange-connection-name`<br/>`--connection-name` *(deprecated)* | `SCHEMACHANGE_CONNECTION_NAME` | Connection profile name from `connections.toml` |
