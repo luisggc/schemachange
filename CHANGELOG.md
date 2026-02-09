@@ -3,8 +3,9 @@ All notable changes to this project will be documented in this file.
 
 *The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).*
 
-## [4.3.0] - TBD
+## [4.3.0] - 2026-02-09
 ### Added
+- **Connector Upgrade**: Bumped minimum `snowflake-connector-python` version from `>=2.8` to `>=3.0` (dropping Python connector 2.x support)
 - **CLI Migration Scripts (`.cli.yml`)**: Execute CLI commands as part of your deployment process. Deploy complex Snowflake objects like dbt projects or Snowpark functions using the Snowflake CLI (`snow`) directly from schemachange:
   - Supports all script types: Versioned (`V`), Repeatable (`R`), and Always (`A`)
   - YAML-based step definitions with command, args, working directory, and environment variables
@@ -18,6 +19,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 - **Password from connections.toml not being passed to Snowflake connector**: The password parameter from `connections.toml` is now correctly passed through to the Snowflake connector. This fix enables proper password authentication when credentials are defined in `connections.toml`.
+- Trailing comment handling: only appends `SELECT 1;` when comments appear on new lines after the last `;` (#406, #258)
 
 
 ## [4.2.0] - 2026-01-02

@@ -403,7 +403,7 @@ Within change scripts, be aware of:
 
 - **Tasks with multi-statement bodies**: Use `EXECUTE IMMEDIATE $$...$$;` or call a stored procedure. Single-statement tasks don't need `BEGIN...END`. Note: `$$` delimiters are NOT valid directly in task definitions.
 - **UTF-8 BOM characters**: Automatically stripped by schemachange (fixed in 4.2.0)
-- **Trailing comments**: Automatically handled with no-op statement (4.2.0+) to prevent "Empty SQL Statement" errors
+- **Trailing comments**: When comments appear on new lines after the final `;`, schemachange automatically appends `SELECT 1;` to prevent "Empty SQL Statement" errors
 - **Snowflake Scripting blocks**: The `execute_string()` method splits on semicolons client-side, breaking `BEGIN...END` blocks. See [TROUBLESHOOTING.md](TROUBLESHOOTING.md) for solutions.
 
 For detailed troubleshooting and solutions, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md)

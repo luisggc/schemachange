@@ -364,12 +364,14 @@ export SNOWFLAKE_PASSWORD="my_password"
 
 ---
 
-### Error: `Script rendered to empty SQL content` or `Script contains only SQL comments` (Issue #258)
+### Error: `Script rendered to empty content` or `Script contains only comments or semicolons` (Issue #258)
 
-**Root Cause:** After Jinja template processing, the script contains only whitespace or comments that Snowflake's connector strips before execution.
+**Root Cause:** After Jinja template processing, the script contains only whitespace, comments, or semicolons.
 
-**How Schemachange Fixes This:**
-- ✅ **Valid SQL + trailing comments**: Auto-appends `SELECT 1;` no-op statement (metadata preserved, debug log message shown)
+**How Schemachange Handles This:**
+- ✅ **Valid SQL**: Passes through unchanged
+- ✅ **Trailing comments on new lines after `;`**: Auto-appends `SELECT 1;` to prevent empty statement error
+- ✅ **Inline comments on same line as `;`**: Passes through unchanged (Snowflake handles fine)
 - ❌ **Comment-only or empty scripts**: Raises clear error with debugging info
 
 **Common Scenarios:**
@@ -411,25 +413,7 @@ export SNOWFLAKE_PASSWORD="my_password"
    - Test locally with same variables to reproduce
    - Check file encoding (UTF-8 without BOM) and line endings
 
-**Error Message Details:**
-
-The error includes helpful debugging information:
-- Raw content preview (first 500 chars)
-- List of variables provided
-- Specific fix suggestions
-
-**Example:**
-```
-ValueError: Script 'V1.0__my_script.sql' rendered to empty SQL content after Jinja processing.
-This can happen when:
-  1. The file contains only whitespace
-  2. All Jinja conditional blocks evaluate to false
-  3. Template variables are missing or incorrect
-  4. The file contains only a semicolon after rendering
-
-Raw content preview: [shows your content]
-Provided variables: ['env', 'feature_flag']
-```
+**Note:** Schemachange automatically handles trailing comments on new lines after the final `;` by appending `SELECT 1;` to prevent "Empty SQL Statement" errors.
 
 ---
 
