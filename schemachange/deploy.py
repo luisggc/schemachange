@@ -1,43 +1,25 @@
 from __future__ import annotations
 
 import hashlib
-import re
 
 import structlog
 
+from schemachange.cli_script_executor import execute_cli_script
+from schemachange.CLIScriptExecutionError import CLIScriptExecutionError
 from schemachange.config.DeployConfig import DeployConfig
 from schemachange.JinjaTemplateProcessor import JinjaTemplateProcessor
 from schemachange.session.Script import get_all_scripts_recursively
 from schemachange.session.SnowflakeSession import SnowflakeSession
+from schemachange.version import get_alphanum_key, sorted_alphanumeric
 
 logger = structlog.getLogger(__name__)
 
 
-def alphanum_convert(text: str):
-    if text.isdigit():
-        return int(text)
-    return text.lower()
-
-
-# This function will return a list containing the parts of the key (split by number parts)
-# Each number is converted to and integer and string parts are left as strings
-# This will enable correct sorting in python when the lists are compared
-# e.g. get_alphanum_key('1.2.2') results in ['', 1, '.', 2, '.', 2, '']
-def get_alphanum_key(key: str | int | None) -> list:
-    if key == "" or key is None:
-        return []
-    alphanum_key = [alphanum_convert(c) for c in re.split("([0-9]+)", key)]
-    return alphanum_key
-
-
-def sorted_alphanumeric(data):
-    return sorted(data, key=get_alphanum_key)
-
-
 def deploy(config: DeployConfig, session: SnowflakeSession):
     logger.info(
-        "starting deploy",
+        "Starting deploy",
         dry_run=config.dry_run,
+        out_of_order=config.out_of_order,
         snowflake_account=session.account,
         default_role=session.role,
         default_warehouse=session.warehouse,
@@ -91,13 +73,24 @@ def deploy(config: DeployConfig, session: SnowflakeSession):
 
         checksum_current = hashlib.sha224(content.encode("utf-8")).hexdigest()
 
-        # Apply a versioned-change script only if the version is newer than the most recent change in the database
-        # Apply any other scripts, i.e. repeatable scripts, irrespective of the most recent change in the database
+        # Apply a versioned-change script based on whether it has been applied and version ordering rules
         if script.type == "V":
             script_metadata = versioned_scripts.get(script.name)
 
-            if max_published_version is not None and get_alphanum_key(script.version) <= max_published_version:
-                if script_metadata is None:
+            # First check: Has this script already been applied?
+            if script_metadata is not None:
+                script_log.debug(
+                    "Script has already been applied",
+                    max_published_version=max_published_version,
+                )
+                if script_metadata["checksum"] != checksum_current:
+                    script_log.info("Script checksum has drifted since application")
+                scripts_skipped += 1
+                continue
+
+            # Second check: Version ordering (only if out_of_order is disabled)
+            if not config.out_of_order:
+                if max_published_version is not None and get_alphanum_key(script.version) <= max_published_version:
                     if config.raise_exception_on_ignored_versioned_script:
                         raise ValueError(
                             f"Versioned script will never be applied: {script.name}\n"
@@ -110,16 +103,6 @@ def deploy(config: DeployConfig, session: SnowflakeSession):
                         )
                         scripts_skipped += 1
                         continue
-                else:
-                    script_log.debug(
-                        "Script has already been applied",
-                        max_published_version=max_published_version,
-                    )
-                    if script_metadata["checksum"] != checksum_current:
-                        script_log.info("Script checksum has drifted since application")
-
-                    scripts_skipped += 1
-                    continue
 
         # Apply only R scripts where the checksum changed compared to the last execution of snowchange
         if script.type == "R":
@@ -135,12 +118,56 @@ def deploy(config: DeployConfig, session: SnowflakeSession):
                 scripts_skipped += 1
                 continue
 
-        session.apply_change_script(
-            script=script,
-            script_content=content,
-            dry_run=config.dry_run,
-            logger=script_log,
+        # Determine if this is an out-of-order execution (versioned script with version <= max)
+        is_out_of_order = (
+            script.type == "V"
+            and config.out_of_order
+            and max_published_version is not None
+            and get_alphanum_key(script.version) <= max_published_version
         )
+
+        # Execute the script based on its format (SQL or CLI)
+        if script.format == "CLI":
+            # Execute CLI script via subprocess
+            try:
+                execution_time = execute_cli_script(
+                    script=script,
+                    content=content,
+                    root_folder=config.root_folder,
+                    dry_run=config.dry_run,
+                    log=script_log,
+                    out_of_order=is_out_of_order,
+                )
+
+                # Record successful execution in change history (unless dry run)
+                if not config.dry_run:
+                    session.record_change_history(
+                        script=script,
+                        checksum=checksum_current,
+                        execution_time=execution_time,
+                        status="Success",
+                        logger=script_log,
+                    )
+            except CLIScriptExecutionError as e:
+                # Record failed execution in change history (unless dry run)
+                if not config.dry_run:
+                    session.record_change_history(
+                        script=script,
+                        checksum=checksum_current,
+                        execution_time=getattr(e, "execution_time", 0),
+                        status="Failed",
+                        logger=script_log,
+                    )
+                raise  # Re-raise the exception after recording
+        else:
+            # Execute SQL script via Snowflake session
+            session.apply_change_script(
+                script=script,
+                script_content=content,
+                dry_run=config.dry_run,
+                logger=script_log,
+                out_of_order=is_out_of_order,
+            )
 
         scripts_applied += 1
 

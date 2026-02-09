@@ -5,10 +5,14 @@ from pathlib import Path
 import pytest
 
 from schemachange.session.Script import (
+    AlwaysCLIScript,
     AlwaysScript,
+    RepeatableCLIScript,
     RepeatableScript,
     Script,
+    VersionedCLIScript,
     VersionedScript,
+    cli_script_factory,
     get_all_scripts_recursively,
     script_factory,
 )
@@ -377,3 +381,126 @@ class TestGetAllScriptsRecursively:
         with pytest.raises(ValueError) as e:
             get_all_scripts_recursively(Path("scripts"))
         assert str(e.value).startswith("The script name R__initial.sql exists more than once (first_instance ")
+
+    #############################
+    #### CLI Script file tests ####
+    #############################
+
+    def test_given_cli_versioned_files_should_return_cli_versioned_files(self, fs):
+        fs.create_file(Path("scripts") / "V1.0.0__deploy_app.cli.yml")
+        fs.create_file(Path("scripts") / "subfolder" / "V1.1.0__update_app.cli.yml")
+        result = get_all_scripts_recursively(Path("scripts"))
+
+        assert len(result) == 2
+        assert "v1.0.0__deploy_app.cli.yml" in result
+        assert "v1.1.0__update_app.cli.yml" in result
+        # Verify format is CLI
+        assert result["v1.0.0__deploy_app.cli.yml"].format == "CLI"
+        assert result["v1.1.0__update_app.cli.yml"].format == "CLI"
+
+    def test_given_cli_repeatable_files_should_return_cli_repeatable_files(self, fs):
+        fs.create_file(Path("scripts") / "R__deploy_streamlit.cli.yml")
+        result = get_all_scripts_recursively(Path("scripts"))
+
+        assert len(result) == 1
+        assert "r__deploy_streamlit.cli.yml" in result
+        assert result["r__deploy_streamlit.cli.yml"].format == "CLI"
+        assert result["r__deploy_streamlit.cli.yml"].type == "R"
+
+    def test_given_cli_always_files_should_return_cli_always_files(self, fs):
+        fs.create_file(Path("scripts") / "A__sync_app.cli.yml")
+        result = get_all_scripts_recursively(Path("scripts"))
+
+        assert len(result) == 1
+        assert "a__sync_app.cli.yml" in result
+        assert result["a__sync_app.cli.yml"].format == "CLI"
+        assert result["a__sync_app.cli.yml"].type == "A"
+
+    def test_given_cli_versioned_jinja_file_should_extract_attributes(self, fs):
+        fs.create_file(Path("scripts") / "V2.0.0__deploy_native_app.cli.yml.jinja")
+        result = get_all_scripts_recursively(Path("scripts"))
+
+        assert len(result) == 1
+        script = result["v2.0.0__deploy_native_app.cli.yml"]
+        assert script.name == "V2.0.0__deploy_native_app.cli.yml"
+        assert script.file_path == Path("scripts") / "V2.0.0__deploy_native_app.cli.yml.jinja"
+        assert script.type == "V"
+        assert script.format == "CLI"
+        assert script.version == "2.0.0"
+        assert script.description == "Deploy native app"
+
+    def test_given_mixed_sql_and_cli_files_should_return_both(self, fs):
+        fs.create_file(Path("scripts") / "V1.0.0__create_tables.sql")
+        fs.create_file(Path("scripts") / "V1.1.0__deploy_app.cli.yml")
+        fs.create_file(Path("scripts") / "R__update_views.sql")
+        fs.create_file(Path("scripts") / "R__deploy_streamlit.cli.yml")
+        result = get_all_scripts_recursively(Path("scripts"))
+
+        assert len(result) == 4
+        # SQL scripts
+        assert result["v1.0.0__create_tables.sql"].format == "SQL"
+        assert result["r__update_views.sql"].format == "SQL"
+        # CLI scripts
+        assert result["v1.1.0__deploy_app.cli.yml"].format == "CLI"
+        assert result["r__deploy_streamlit.cli.yml"].format == "CLI"
+
+    def test_cli_version_number_regex_should_apply_to_cli_scripts(self, fs):
+        fs.create_file(Path("scripts") / "V1.0.0__deploy_app.cli.yml")
+        result = get_all_scripts_recursively(
+            Path("scripts"),
+            version_number_regex=r"\d\.\d\.\d",
+        )
+
+        assert len(result) == 1
+
+    def test_cli_version_number_regex_invalid_should_raise_exception(self, fs):
+        fs.create_file(Path("scripts") / "V1.10.0__deploy_app.cli.yml")
+        with pytest.raises(ValueError) as e:
+            get_all_scripts_recursively(
+                Path("scripts"),
+                version_number_regex=r"\d\.\d\.\d",
+            )
+        assert "CLI script version doesn't match" in str(e.value)
+
+
+class TestCLIScriptFactory:
+    @pytest.mark.parametrize(
+        "file_path, expected_type, expected_format",
+        [
+            (Path("V1.0.0__deploy.cli.yml"), VersionedCLIScript, "CLI"),
+            (Path("V1.0.0__deploy.cli.yml.jinja"), VersionedCLIScript, "CLI"),
+            (Path("R__sync.cli.yml"), RepeatableCLIScript, "CLI"),
+            (Path("R__sync.cli.yml.jinja"), RepeatableCLIScript, "CLI"),
+            (Path("A__always_run.cli.yml"), AlwaysCLIScript, "CLI"),
+            (Path("A__always_run.cli.yml.jinja"), AlwaysCLIScript, "CLI"),
+        ],
+    )
+    def test_cli_script_factory(self, file_path: Path, expected_type, expected_format: str):
+        result = cli_script_factory(file_path)
+        assert isinstance(result, expected_type)
+        assert result.format == expected_format
+
+    @pytest.mark.parametrize(
+        "file_path",
+        [
+            Path("V1.0.0__deploy.sql"),
+            Path("R__sync.sql"),
+            Path("something.cli.yml"),
+            Path("random_file.yml"),
+        ],
+    )
+    def test_cli_script_factory_returns_none_for_non_cli_scripts(self, file_path: Path):
+        result = cli_script_factory(file_path)
+        assert result is None
+
+    def test_cli_script_single_underscore_should_raise_exception(self):
+        file_path = Path("V1.0.0_deploy.cli.yml")
+        with pytest.raises(ValueError) as e:
+            cli_script_factory(file_path)
+        assert "two underscores" in str(e.value)
+
+    def test_cli_script_missing_version_should_raise_exception(self):
+        file_path = Path("V__deploy.cli.yml")
+        with pytest.raises(ValueError) as e:
+            cli_script_factory(file_path)
+        assert "Versioned CLI migrations must be prefixed with a version" in str(e.value)

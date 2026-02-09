@@ -967,6 +967,7 @@ def get_schemachange_config_from_env() -> dict:
         "SCHEMACHANGE_AUTOCOMMIT": "autocommit",
         "SCHEMACHANGE_DRY_RUN": "dry_run",
         "SCHEMACHANGE_RAISE_EXCEPTION_ON_IGNORED_VERSIONED_SCRIPT": "raise_exception_on_ignored_versioned_script",
+        "SCHEMACHANGE_OUT_OF_ORDER": "out_of_order",
     }
 
     for env_var, param_name in bool_params.items():

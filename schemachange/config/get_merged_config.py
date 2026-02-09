@@ -298,12 +298,23 @@ def get_merged_config(
         cli_snowflake_params={k: v for k, v in cli_kwargs.items() if k.startswith("snowflake_")},
     )
 
-    # Add snowflake_ prefix to ALL Snowflake connector parameters for internal consistency
+    # Add snowflake_ prefix to Snowflake connector parameters for internal consistency
     # The prefix will be stripped later when building connect_kwargs
+    # EXCEPTION: 'password' is handled specially - it goes to additional_snowflake_params
+    # to be passed directly to the connector (not stored as a config field)
     merged_count = 0
     skipped_params = []
+    toml_pass_through_params = {}  # Parameters to pass directly to connector
+
     for key, value in toml_connection_params.items():
-        # All parameters from connections.toml get snowflake_ prefix internally
+        # Special handling for password - pass through directly to connector
+        # Don't add snowflake_ prefix, don't make it a config field
+        if key == "password":
+            toml_pass_through_params["password"] = value
+            merged_count += 1
+            continue
+
+        # All other parameters from connections.toml get snowflake_ prefix internally
         config_key = f"snowflake_{key}"
 
         # Only set if not already set by higher priority source
@@ -436,10 +447,11 @@ def get_merged_config(
             yaml_kwargs[f"snowflake_{param}"] = normalized_yaml_params.pop(param)
 
     # Remaining normalized_yaml_params are generic pass-through parameters
-    # Merge with priority: ENV > YAML (both now in snake_case)
+    # Merge with priority: ENV > YAML > connections.toml (for pass-through params like password)
     additional_snowflake_params = {
-        **normalized_yaml_params,
-        **env_snowflake_params,
+        **toml_pass_through_params,  # P4: connections.toml (lowest priority)
+        **normalized_yaml_params,  # P3: YAML
+        **env_snowflake_params,  # P2: ENV (highest for pass-through params)
     }
 
     # Apply priority: P3 (YAML) < P2 (ENV) < P1 (CLI)
