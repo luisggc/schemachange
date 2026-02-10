@@ -91,12 +91,35 @@ class JinjaTemplateProcessor:
                 f"Script '{script}' contains only comments or semicolons. Add SQL statements or remove the script."
             )
 
+        # NOTE: Trailing comment handling is NOT done here to preserve checksum stability.
+        # Use prepare_for_execution() before sending to Snowflake. (issue #414)
+        return content
+
+    def prepare_for_execution(self, content: str, script: str | Path) -> str:
+        """Apply execution-time SQL transformations to rendered content.
+
+        This handles Snowflake-specific quirks like trailing comments that would
+        cause "Empty SQL Statement" errors. Call this AFTER checksum computation,
+        BEFORE sending to Snowflake for execution.
+
+        Args:
+            content: The rendered script content (from render())
+            script: The script path (for logging and CLI detection)
+
+        Returns:
+            Content ready for Snowflake execution
+
+        Note:
+            This separation ensures checksums are computed on user content,
+            not on internal workarounds. See issue #414.
+        """
+        if self._is_cli_script(script):
+            return content
+
         # Handle trailing comments after last semicolon (issue #258, #406)
         # When content after the last ; is only whitespace/comments, Snowflake's
         # execute_string() sees it as a new empty statement and errors.
-        content = self._handle_trailing_comments(content, script)
-
-        return content
+        return self._handle_trailing_comments(content, str(script))
 
     def _find_last_real_semicolon(self, content: str) -> int:
         """Find the last semicolon that is NOT inside a comment.

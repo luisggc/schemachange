@@ -126,13 +126,20 @@ def deploy(config: DeployConfig, session: SnowflakeSession):
             and get_alphanum_key(script.version) <= max_published_version
         )
 
+        # Prepare content for execution (apply trailing comment fix)
+        # This is done AFTER checksum computation to maintain checksum stability (issue #414)
+        executable_content = jinja_processor.prepare_for_execution(
+            content,
+            jinja_processor.relpath(script.file_path),
+        )
+
         # Execute the script based on its format (SQL or CLI)
         if script.format == "CLI":
             # Execute CLI script via subprocess
             try:
                 execution_time = execute_cli_script(
                     script=script,
-                    content=content,
+                    content=executable_content,
                     root_folder=config.root_folder,
                     dry_run=config.dry_run,
                     log=script_log,
@@ -163,7 +170,7 @@ def deploy(config: DeployConfig, session: SnowflakeSession):
             # Execute SQL script via Snowflake session
             session.apply_change_script(
                 script=script,
-                script_content=content,
+                script_content=executable_content,
                 dry_run=config.dry_run,
                 logger=script_log,
                 out_of_order=is_out_of_order,

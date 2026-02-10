@@ -14,8 +14,9 @@ This guide covers common errors and their solutions when using schemachange.
 2. [Permission and Access Errors](#permission-and-access-errors)
 3. [Security Warnings](#security-warnings)
 4. [Configuration and Script Errors](#configuration-and-script-errors)
-5. [Migration and Deprecation Warnings (4.1.0+)](#migration-and-deprecation-warnings-410)
-6. [Additional Resources](#additional-resources)
+5. [Upgrade Issues](#upgrade-issues)
+6. [Migration and Deprecation Warnings (4.1.0+)](#migration-and-deprecation-warnings-410)
+7. [Additional Resources](#additional-resources)
 
 ---
 
@@ -481,6 +482,58 @@ schemachange deploy
 - ❌ Does NOT modify any objects
 
 See [Dry-Run Mode](README.md#dry-run-mode) in the README for more details.
+
+---
+
+## Upgrade Issues
+
+### Checksum Drift After Upgrading to v4.3.0
+
+**Symptoms:**
+- V-scripts show "Script checksum has drifted since application" warnings
+- R-scripts unexpectedly re-execute on first deploy after upgrade
+
+**Affected Versions:** v4.3.0 only (fixed in v4.3.1)
+
+**Affected Scripts:** Only scripts with comments on new lines after the final semicolon:
+```sql
+SELECT * FROM table;
+-- This trailing comment on a new line triggers the issue
+```
+
+**Root Cause:** The trailing comment fix in v4.3.0 (for issues #258, #406) modified script content *before* checksum computation, causing all affected scripts to have different checksums than v4.2.0.
+
+**Impact:**
+| Script Type | Behavior |
+|-------------|----------|
+| V-scripts | Warning message only (won't re-execute) |
+| R-scripts | Re-executes once on first v4.3.0 deploy, then stable |
+| A-scripts | No change (always run by design) |
+
+**Solutions:**
+
+1. **Upgrade to v4.3.1** (Recommended):
+   ```bash
+   pip install schemachange==4.3.1
+   ```
+   - From v4.2.0 → v4.3.1: Seamless, no unexpected execution
+   - From v4.3.0 → v4.3.1: R-scripts may execute once more (reverting to original checksum)
+
+2. **If already on v4.3.0 and stable:**
+   - You can stay on v4.3.0 if:
+     - R-scripts have already re-executed and stabilized
+     - You don't need to downgrade to v4.2.0
+   - Checksums will remain different from v4.2.0
+
+3. **Ensure R-scripts are idempotent:**
+   - Best practice regardless of version
+   - Prevents data issues from unexpected re-execution
+
+**Technical Details:** v4.3.1 implements two-phase rendering:
+- `render()` returns content for checksum computation (unchanged from v4.2.0)
+- `prepare_for_execution()` applies the trailing comment fix for Snowflake execution only
+
+This ensures checksums reflect user content, not internal workarounds.
 
 ---
 
