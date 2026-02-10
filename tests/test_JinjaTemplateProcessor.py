@@ -205,22 +205,20 @@ class TestJinjaTemplateProcessor:
 
         assert result == "SELECT 1 /* inline comment */ FROM dual"
 
-    def test_render_trailing_comment_after_semicolon_appends_select1(self, processor: JinjaTemplateProcessor):
-        """Test that SQL with trailing comment AFTER semicolon gets SELECT 1; appended.
+    def test_render_trailing_comment_after_semicolon_unchanged(self, processor: JinjaTemplateProcessor):
+        """Test that SQL with trailing comment AFTER semicolon passes through render() unchanged.
 
-        Issue #258, #406: Snowflake's execute_string() sees content after ; as a new
-        statement. If it's only comments, Snowflake strips them and gets empty string.
-        schemachange appends SELECT 1; to prevent this error.
+        Issue #414: render() should NOT modify content for checksum stability.
+        The trailing comment fix is applied by prepare_for_execution() instead.
         """
         templates = {"test.sql": "CREATE TABLE foo (id INT);\n-- Author: John Doe"}
         processor.override_loader(DictLoader(templates))
 
         result = processor.render("test.sql", None)
 
-        # SELECT 1; appended to handle trailing comment
-        assert "CREATE TABLE foo (id INT);" in result
-        assert "-- Author: John Doe" in result
-        assert "SELECT 1; -- schemachange: trailing comment fix" in result
+        # render() should NOT append SELECT 1; - that's done by prepare_for_execution()
+        assert result == "CREATE TABLE foo (id INT);\n-- Author: John Doe"
+        assert "SELECT 1; -- schemachange: trailing comment fix" not in result
 
     def test_render_multistatement_sql_passes_through(self, processor: JinjaTemplateProcessor):
         """Test that multi-statement SQL passes through unchanged"""
@@ -289,29 +287,27 @@ class TestJinjaTemplateProcessor:
         assert result == "SELECT 1; -- inline comment"
         assert "SELECT 1; -- schemachange" not in result
 
-    def test_render_multiline_trailing_comment_appends_select1(self, processor: JinjaTemplateProcessor):
-        """Test that multi-line block comment after semicolon gets SELECT 1; appended."""
+    def test_render_multiline_trailing_comment_unchanged(self, processor: JinjaTemplateProcessor):
+        """Test that multi-line block comment after semicolon passes through render() unchanged."""
         templates = {"test.sql": "CREATE TABLE bar (id INT);\n/* Metadata\nblock */"}
         processor.override_loader(DictLoader(templates))
 
         result = processor.render("test.sql", None)
 
-        assert "CREATE TABLE bar (id INT);" in result
-        assert "/* Metadata\nblock */" in result
-        assert "SELECT 1; -- schemachange: trailing comment fix" in result
+        # render() should NOT modify - prepare_for_execution() handles this
+        assert result == "CREATE TABLE bar (id INT);\n/* Metadata\nblock */"
+        assert "SELECT 1; -- schemachange: trailing comment fix" not in result
 
-    def test_render_multiple_trailing_comments_appends_select1(self, processor: JinjaTemplateProcessor):
-        """Test that multiple trailing comments after semicolon gets SELECT 1; appended."""
+    def test_render_multiple_trailing_comments_unchanged(self, processor: JinjaTemplateProcessor):
+        """Test that multiple trailing comments after semicolon passes through render() unchanged."""
         templates = {"test.sql": "SELECT 1;\n-- comment 1\n-- comment 2\n-- comment 3"}
         processor.override_loader(DictLoader(templates))
 
         result = processor.render("test.sql", None)
 
-        assert "SELECT 1;" in result
-        assert "-- comment 1" in result
-        assert "-- comment 2" in result
-        assert "-- comment 3" in result
-        assert "SELECT 1; -- schemachange: trailing comment fix" in result
+        # render() should NOT modify - prepare_for_execution() handles this
+        assert result == "SELECT 1;\n-- comment 1\n-- comment 2\n-- comment 3"
+        assert "SELECT 1; -- schemachange: trailing comment fix" not in result
 
     def test_render_no_semicolon_with_trailing_comment_unchanged(self, processor: JinjaTemplateProcessor):
         """Test that SQL without semicolon and trailing comment passes through unchanged.
@@ -354,11 +350,10 @@ class TestJinjaTemplateProcessor:
         assert result == "SELECT 1;"
         assert "SELECT 1; -- schemachange" not in result
 
-    def test_render_semicolon_in_comment_ignored(self, processor: JinjaTemplateProcessor):
-        """Test that semicolons INSIDE comments are ignored when finding last real semicolon.
+    def test_render_semicolon_in_comment_unchanged(self, processor: JinjaTemplateProcessor):
+        """Test that render() passes through content unchanged even with semicolons in comments.
 
-        This is a regression test - semicolons in comment text (e.g., "SELECT 1;")
-        should not be detected as the last semicolon in the file.
+        Issue #414: render() should NOT modify content for checksum stability.
         """
         templates = {
             "test.sql": """CREATE TABLE foo (id INT);
@@ -369,12 +364,12 @@ class TestJinjaTemplateProcessor:
 
         result = processor.render("test.sql", None)
 
-        # The real last semicolon is after "CREATE TABLE foo (id INT)"
-        # The trailing comments should trigger SELECT 1; append
-        assert "SELECT 1; -- schemachange: trailing comment fix" in result
+        # render() should NOT modify content
+        assert "SELECT 1; -- schemachange: trailing comment fix" not in result
+        assert "CREATE TABLE foo (id INT);" in result
 
-    def test_render_semicolon_in_block_comment_ignored(self, processor: JinjaTemplateProcessor):
-        """Test that semicolons inside block comments are ignored."""
+    def test_render_semicolon_in_block_comment_unchanged(self, processor: JinjaTemplateProcessor):
+        """Test that render() passes through content unchanged with semicolons in block comments."""
         templates = {
             "test.sql": """SELECT * FROM bar;
 /* This block comment has SELECT 1; inside it */"""
@@ -383,9 +378,9 @@ class TestJinjaTemplateProcessor:
 
         result = processor.render("test.sql", None)
 
-        # The real last semicolon is after "SELECT * FROM bar"
-        # The trailing block comment should trigger SELECT 1; append
-        assert "SELECT 1; -- schemachange: trailing comment fix" in result
+        # render() should NOT modify content
+        assert "SELECT 1; -- schemachange: trailing comment fix" not in result
+        assert "SELECT * FROM bar;" in result
 
     # ============================================================
     # UTF-8 BOM handling tests - issue #250
@@ -421,3 +416,112 @@ class TestJinjaTemplateProcessor:
 
         assert not result.startswith("\ufeff")
         assert "'\ufeff'" in result  # BOM inside the SQL string should remain
+
+    # ============================================================
+    # prepare_for_execution() tests - issue #414
+    # Two-phase render: render() for checksum, prepare_for_execution() for Snowflake
+    # ============================================================
+
+    def test_prepare_for_execution_appends_select1_for_trailing_comment(self, processor: JinjaTemplateProcessor):
+        """Test that prepare_for_execution() appends SELECT 1; for trailing comments.
+
+        Issue #258, #406: Snowflake's execute_string() sees content after ; as a new
+        statement. If it's only comments, Snowflake strips them and gets empty string.
+
+        Issue #414: This fix is now applied in prepare_for_execution(), not render(),
+        to maintain checksum stability.
+        """
+        content = "CREATE TABLE foo (id INT);\n-- Author: John Doe"
+
+        result = processor.prepare_for_execution(content, "test.sql")
+
+        assert "CREATE TABLE foo (id INT);" in result
+        assert "-- Author: John Doe" in result
+        assert "SELECT 1; -- schemachange: trailing comment fix" in result
+
+    def test_prepare_for_execution_appends_select1_for_multiline_comment(self, processor: JinjaTemplateProcessor):
+        """Test that prepare_for_execution() handles multi-line block comments."""
+        content = "CREATE TABLE bar (id INT);\n/* Metadata\nblock */"
+
+        result = processor.prepare_for_execution(content, "test.sql")
+
+        assert "CREATE TABLE bar (id INT);" in result
+        assert "/* Metadata\nblock */" in result
+        assert "SELECT 1; -- schemachange: trailing comment fix" in result
+
+    def test_prepare_for_execution_appends_select1_for_multiple_trailing_comments(
+        self, processor: JinjaTemplateProcessor
+    ):
+        """Test that prepare_for_execution() handles multiple trailing comments."""
+        content = "SELECT 1;\n-- comment 1\n-- comment 2\n-- comment 3"
+
+        result = processor.prepare_for_execution(content, "test.sql")
+
+        assert "SELECT 1;" in result
+        assert "-- comment 1" in result
+        assert "SELECT 1; -- schemachange: trailing comment fix" in result
+
+    def test_prepare_for_execution_unchanged_for_inline_comment(self, processor: JinjaTemplateProcessor):
+        """Test that prepare_for_execution() doesn't modify inline comments on same line as ;"""
+        content = "SELECT 1; -- inline comment"
+
+        result = processor.prepare_for_execution(content, "test.sql")
+
+        assert result == "SELECT 1; -- inline comment"
+        assert "SELECT 1; -- schemachange" not in result
+
+    def test_prepare_for_execution_unchanged_for_no_trailing_content(self, processor: JinjaTemplateProcessor):
+        """Test that prepare_for_execution() doesn't modify SQL ending with just semicolon."""
+        content = "CREATE TABLE foo (id INT);"
+
+        result = processor.prepare_for_execution(content, "test.sql")
+
+        assert result == "CREATE TABLE foo (id INT);"
+        assert "SELECT 1; -- schemachange" not in result
+
+    def test_prepare_for_execution_skips_cli_scripts(self, processor: JinjaTemplateProcessor):
+        """Test that prepare_for_execution() doesn't modify CLI scripts."""
+        content = "steps:\n  - command: echo hello"
+
+        result = processor.prepare_for_execution(content, "test.cli.yml")
+
+        assert result == content
+        assert "SELECT 1;" not in result
+
+    def test_prepare_for_execution_handles_semicolon_in_comment(self, processor: JinjaTemplateProcessor):
+        """Test that semicolons inside comments are correctly ignored."""
+        content = """CREATE TABLE foo (id INT);
+-- This comment mentions SELECT 1; but it's in a comment
+-- Another comment with semicolon; here"""
+
+        result = processor.prepare_for_execution(content, "test.sql")
+
+        # The real last semicolon is after "CREATE TABLE foo (id INT)"
+        # The trailing comments should trigger SELECT 1; append
+        assert "SELECT 1; -- schemachange: trailing comment fix" in result
+
+    def test_two_phase_render_checksum_stability(self, processor: JinjaTemplateProcessor):
+        """Test that render() output is stable for checksum computation.
+
+        Issue #414: This is a regression test to ensure checksums don't change
+        between schemachange versions. The content returned by render() should
+        NOT include any execution-time transformations.
+        """
+        templates = {"test.sql": "SELECT 1;\n-- trailing comment"}
+        processor.override_loader(DictLoader(templates))
+
+        # render() should return content without modification
+        rendered = processor.render("test.sql", None)
+        assert rendered == "SELECT 1;\n-- trailing comment"
+        assert "schemachange" not in rendered
+
+        # prepare_for_execution() should add the fix
+        executable = processor.prepare_for_execution(rendered, "test.sql")
+        assert "SELECT 1; -- schemachange: trailing comment fix" in executable
+
+        # Checksum should be computed on rendered content, not executable
+        import hashlib
+
+        checksum = hashlib.sha224(rendered.encode()).hexdigest()
+        # This checksum should be stable across versions
+        assert checksum == hashlib.sha224(b"SELECT 1;\n-- trailing comment").hexdigest()

@@ -3,6 +3,14 @@ All notable changes to this project will be documented in this file.
 
 *The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).*
 
+## [4.3.1] - 2026-02-10
+### Fixed
+- **Checksum stability fix** (#414): Fixed regression where upgrading from v4.2.0 caused checksum drift for scripts with trailing comments. See [Troubleshooting Guide](TROUBLESHOOTING.md#checksum-drift-after-upgrading-to-v430) for details.
+
+### Upgrade Notes
+- **From v4.2.0**: Seamless upgrade, no unexpected script execution
+- **From v4.3.0**: R-scripts with trailing comments may execute once more (reverting to original checksum)
+
 ## [4.3.0] - 2026-02-09
 ### Added
 - **Connector Upgrade**: Bumped minimum `snowflake-connector-python` version from `>=2.8` to `>=3.0` (dropping Python connector 2.x support)
