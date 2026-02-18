@@ -5,11 +5,11 @@ import pytest
 from schemachange.cli import SCHEMACHANGE_VERSION, SNOWFLAKE_APPLICATION_NAME
 from schemachange.config.ChangeHistoryTable import ChangeHistoryTable
 from schemachange.config.utils import get_snowflake_identifier_string
-from schemachange.deploy import alphanum_convert, get_alphanum_key, sorted_alphanumeric
+from schemachange.version import alphanum_convert, get_alphanum_key, sorted_alphanumeric
 
 
 def test_cli_given__schemachange_version_change_updated_in_setup_config_file():
-    assert SCHEMACHANGE_VERSION == "4.1.0"
+    assert SCHEMACHANGE_VERSION == "4.3.2"
 
 
 def test_cli_given__constants_exist():
@@ -160,9 +160,7 @@ def test__get_snowflake_identifier_string_given__acceptable_values_produces_prop
     "input_value, input_type",
     [('"valid-value-123', "role"), ('valid-value-123"', "role")],
 )
-def test__get_snowflake_identifier_string_given__unacceptable_values_raises_error(
-    input_value, input_type
-):
+def test__get_snowflake_identifier_string_given__unacceptable_values_raises_error(input_value, input_type):
     with pytest.raises(ValueError) as e:
         get_snowflake_identifier_string(input_value, input_type)
 

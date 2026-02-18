@@ -1,0 +1,16 @@
+config-version: 1
+
+# Root folder containing migration scripts
+root-folder: "."
+
+# For dry-run testing, we still need a change history table defined
+# (it won't actually be created/used in dry-run mode)
+change-history-table: "DEMO_DB.PUBLIC.CHANGE_HISTORY"
+#change-history-table: "TEST_DB.PUBLIC.CHANGE_HISTORY"
+create-change-history-table: true
+
+# Minimal Snowflake config for dry-run (won't actually connect)
+# You can also set these as environment variables:
+#   export SNOWFLAKE_ACCOUNT=your_account
+#   export SNOWFLAKE_USER=your_user
+#   export SNOWFLAKE_DATABASE=TEST_DB

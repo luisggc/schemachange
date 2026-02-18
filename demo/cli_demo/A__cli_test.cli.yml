@@ -1,0 +1,5 @@
+steps:
+  - cli: snow
+    command: init
+    working_dir: .
+    description: "Test CLI"

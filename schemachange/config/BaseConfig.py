@@ -9,9 +9,9 @@ from typing import Literal, TypeVar
 import structlog
 
 from schemachange.config.utils import (
-    validate_directory,
-    validate_config_vars,
     get_config_secrets,
+    validate_config_vars,
+    validate_directory,
 )
 
 logger = structlog.getLogger(__name__)
@@ -38,14 +38,26 @@ class BaseConfig(ABC):
         modules_folder: Path | str | None = None,
         config_vars: str | dict | None = None,
         log_level: int = logging.INFO,
+        auth_secrets: dict[str, str] | None = None,
         **kwargs,
     ):
         try:
-            secrets = get_config_secrets(config_vars)
+            secrets = get_config_secrets(config_vars, auth_secrets)
         except Exception as e:
-            raise Exception(
-                "config_vars did not parse correctly, please check its configuration"
-            ) from e
+            raise Exception("config_vars did not parse correctly, please check its configuration") from e
+
+        # Get the field names from the dataclass to validate against
+        field_names = {field.name for field in dataclasses.fields(cls)}
+
+        # Check for unknown keys and warn about them
+        # Note: auth_secrets is not a field, so we need to exclude it
+        kwargs_to_check = {k: v for k, v in kwargs.items() if k != "auth_secrets"}
+        unknown_keys = set(kwargs_to_check.keys()) - field_names
+        if unknown_keys:
+            unknown_keys_str = ", ".join(sorted(unknown_keys))
+            logger.warning(f"Unknown configuration keys found and will be ignored: {unknown_keys_str}")
+            # Filter out unknown keys to prevent TypeError
+            kwargs = {k: v for k, v in kwargs.items() if k in field_names}
 
         return cls(
             subcommand=subcommand,
@@ -61,8 +73,6 @@ class BaseConfig(ABC):
     def log_details(self):
         logger.info("Using root folder", root_folder=str(self.root_folder))
         if self.modules_folder:
-            logger.info(
-                "Using Jinja modules folder", modules_folder=str(self.modules_folder)
-            )
+            logger.info("Using Jinja modules folder", modules_folder=str(self.modules_folder))
 
         logger.info("Using variables", vars=self.config_vars)

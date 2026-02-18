@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 import pytest
 import structlog
 
@@ -714,6 +713,18 @@ cases: list = [
         {"key_1": {"key_2": {"key_3a": "******", "key_3b": "*****"}}},
         id="Secrets, nested x 2 dict payload masked",
     ),
+    pytest.param(
+        {"multiline_secret\nwith_newlines"},
+        {"key_1": "This contains multiline_secret\nwith_newlines in it"},
+        {"key_1": "This contains ****************\n************* in it"},
+        id="multiline secret redacted with newlines preserved (PR #238 by @rwberendsen)",
+    ),
+    pytest.param(
+        {"line1\nline2\nline3"},
+        {"azure_cert": "line1\nline2\nline3"},
+        {"azure_cert": "*****\n*****\n*****"},
+        id="multiline certificate redacted preserving structure (issue #237)",
+    ),
 ]
 
 
@@ -725,14 +736,10 @@ class NoStr:
 class TestGetRedactConfigSecretsProcessor:
     @pytest.mark.parametrize("secrets, extra_kwargs, expected", cases)
     def test_happy_path(self, secrets: set[str], extra_kwargs: dict, expected: dict):
-        redact_config_secrets_processor = get_redact_config_secrets_processor(
-            config_secrets=secrets
-        )
+        redact_config_secrets_processor = get_redact_config_secrets_processor(config_secrets=secrets)
 
         # noinspection PyTypeChecker
-        result = redact_config_secrets_processor(
-            None, "info", {"event": "event text", "level": "info", **extra_kwargs}
-        )
+        result = redact_config_secrets_processor(None, "info", {"event": "event text", "level": "info", **extra_kwargs})
 
         assert result == {"event": "event text", "level": "info", **expected}
 
@@ -740,17 +747,7 @@ class TestGetRedactConfigSecretsProcessor:
         "extra_kwargs, expected_warning",
         [
             (
-                {
-                    "key_1": {
-                        "key_1": {
-                            "key_1": {
-                                "key_1": {
-                                    "key_1": {"key_1": {"key_1": {"key_1": "secret"}}}
-                                }
-                            }
-                        }
-                    }
-                },
+                {"key_1": {"key_1": {"key_1": {"key_1": {"key_1": {"key_1": {"key_1": {"key_1": "secret"}}}}}}}},
                 "Unable to redact deeply nested secrets in log",
             ),
             (
@@ -760,14 +757,10 @@ class TestGetRedactConfigSecretsProcessor:
         ],
     )
     def test_warnings(self, extra_kwargs: dict, expected_warning: str):
-        redact_config_secrets_processor = get_redact_config_secrets_processor(
-            config_secrets={"secret"}
-        )
+        redact_config_secrets_processor = get_redact_config_secrets_processor(config_secrets={"secret"})
 
         with pytest.warns(UserWarning) as e:
             # noinspection PyTypeChecker
-            redact_config_secrets_processor(
-                None, "info", {"event": "event text", "level": "info", **extra_kwargs}
-            )
+            redact_config_secrets_processor(None, "info", {"event": "event text", "level": "info", **extra_kwargs})
 
         assert expected_warning in str(e[0].message)
