@@ -88,7 +88,6 @@ def test_get_yaml_config(_):
     assert yaml_config["create_change_history_table"] is False
     assert yaml_config["autocommit"] is False
     assert yaml_config["dry_run"] is False
-    assert yaml_config["continue_versioned_on_error"] is False
     assert yaml_config["continue_repeatable_on_error"] is False
     assert yaml_config["continue_always_on_error"] is False
 

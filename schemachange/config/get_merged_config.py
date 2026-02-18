@@ -466,7 +466,6 @@ def get_merged_config(
     }
     if "continue_all_on_error" in kwargs:
         if kwargs["continue_all_on_error"]:
-            kwargs["continue_versioned_on_error"] = True
             kwargs["continue_repeatable_on_error"] = True
             kwargs["continue_always_on_error"] = True
         del kwargs["continue_all_on_error"]

@@ -613,8 +613,8 @@ class SnowflakeSession:
         checksum: str,
         execution_time: int,
         status: str,
-        error_message: str = "",
         logger: structlog.BoundLogger,
+        error_message: str = "",
     ) -> None:
         """
         Record a script execution in the change history table.

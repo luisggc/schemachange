@@ -72,7 +72,6 @@ def test_parse_args_deploy_names():
         ("--dry-run", True),
         ("--raise-exception-on-ignored-versioned-script", True),
         ("--continue-all-on-error", True),
-        ("--continue-versioned-on-error", True),
         ("--continue-repeatable-on-error", True),
         ("--continue-always-on-error", True),
     ]

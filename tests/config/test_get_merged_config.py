@@ -389,7 +389,6 @@ param_full_yaml_and_connection = pytest.param(
                 "dry_run",
                 "query_tag",
                 "connection_name",
-                "continue_versioned_on_error",
                 "continue_repeatable_on_error",
                 "continue_always_on_error",
             ]
@@ -457,7 +456,6 @@ param_full_yaml_and_connection_and_cli = pytest.param(
         "autocommit": True,
         "log_level": logging.INFO,
         "dry_run": True,
-        "continue_versioned_on_error": False,
         "continue_repeatable_on_error": False,
         "continue_always_on_error": False,
         "query_tag": "query-tag-from-cli",
@@ -529,7 +527,6 @@ param_full_yaml_and_connection_and_cli_and_env = pytest.param(
         "autocommit": True,
         "log_level": logging.INFO,
         "dry_run": True,
-        "continue_versioned_on_error": False,
         "continue_repeatable_on_error": False,
         "continue_always_on_error": False,
         "query_tag": "query-tag-from-cli",

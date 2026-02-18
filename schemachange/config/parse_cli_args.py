@@ -386,14 +386,6 @@ def parse_cli_args(args) -> dict:
         required=False,
     )
     parser_deploy.add_argument(
-       "--continue-versioned-on-error",
-        action="store_const",
-        const=True,
-        default=None,
-        help="Continue running remaining versioned scripts after an error (the default is False)",
-        required=False,
-    )
-    parser_deploy.add_argument(
         "--continue-repeatable-on-error",
         action="store_const",
         const=True,

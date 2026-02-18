@@ -1431,8 +1431,7 @@ Most arguments also support short forms (single dash, single letter) for conveni
 | `--schemachange-create-change-history-table`<br/>`--create-change-history-table` *(deprecated)* | `SCHEMACHANGE_CREATE_CHANGE_HISTORY_TABLE` | Create the change history table if it doesn't exist (default: false) |
 | `-ac`<br/>`--schemachange-autocommit`<br/>`--autocommit` *(deprecated)* | `SCHEMACHANGE_AUTOCOMMIT` | Enable autocommit for DML commands (default: false) |
 | `--schemachange-dry-run`<br/>`--dry-run` *(deprecated)* | `SCHEMACHANGE_DRY_RUN` | Run in dry run mode (default: false) |
-| `--continue-all-on-error` | | Continue executing remaining scripts even if one fails. Use the script-type flags for finer control (default: false) |
-| `--continue-versioned-on-error` | | Continue executing remaining versioned scripts after an error (default: false) |
+| `--continue-all-on-error` | | Continue executing remaining repeatable and always scripts even if one fails. Versioned scripts always stop on failure (default: false) |
 | `--continue-repeatable-on-error` | | Continue executing remaining repeatable scripts after an error (default: false) |
 | `--continue-always-on-error` | | Continue executing remaining always scripts after an error (default: false) |
 | `--out-of-order` | `SCHEMACHANGE_OUT_OF_ORDER` | Allow out-of-order versioned script execution for parallel development (default: false) |

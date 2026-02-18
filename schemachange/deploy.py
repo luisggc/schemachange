@@ -119,10 +119,8 @@ def deploy(config: DeployConfig, session: SnowflakeSession):
                 script_log.debug("Skipping change script because there is no change since the last execution")
                 scripts_skipped += 1
                 continue
-        should_continue = (
-            (script.type == "V" and config.continue_versioned_on_error)
-            or (script.type == "R" and config.continue_repeatable_on_error)
-            or (script.type == "A" and config.continue_always_on_error)
+        should_continue = (script.type == "R" and config.continue_repeatable_on_error) or (
+            script.type == "A" and config.continue_always_on_error
         )
         # Determine if this is an out-of-order execution (versioned script with version <= max)
         is_out_of_order = (
