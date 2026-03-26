@@ -185,9 +185,9 @@ def deploy(config: DeployConfig, session: SnowflakeSession):
         except Exception as e:
             scripts_failed += 1
             failed_scripts.append(script.name)
-            script_log.error("Failed to apply change script", error=str(e))
             if not should_continue:
                 raise
+            script_log.error("Failed to apply change script, continuing", error=str(e))
 
     if scripts_failed > 0:
         logger.error(
